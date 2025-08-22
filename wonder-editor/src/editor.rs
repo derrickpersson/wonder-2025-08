@@ -1,130 +1,46 @@
 use gpui::{
     div, prelude::*, rgb, Context, Render,
 };
-use crate::text_buffer::TextBuffer;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SpecialKey {
-    Backspace,
-    ArrowLeft,
-    ArrowRight,
-    ArrowUp,
-    ArrowDown,
-}
+use crate::core::TextDocument;
+use crate::input::{KeyboardHandler, InputEvent};
 
 pub struct MarkdownEditor {
-    content: String,
-    cursor_position: usize,
-    text_buffer: Option<TextBuffer>,
+    document: TextDocument,
+    keyboard_handler: KeyboardHandler,
     focused: bool,
 }
 
 impl MarkdownEditor {
     pub fn new(_cx: &mut Context<Self>) -> Self {
         Self {
-            content: String::new(),
-            cursor_position: 0,
-            text_buffer: None,
+            document: TextDocument::new(),
+            keyboard_handler: KeyboardHandler::new(),
             focused: false,
         }
     }
 
-    pub fn new_with_buffer() -> Self {
+    pub fn new_with_content(content: String) -> Self {
         Self {
-            content: String::new(),
-            cursor_position: 0,
-            text_buffer: Some(TextBuffer::new()),
+            document: TextDocument::with_content(content),
+            keyboard_handler: KeyboardHandler::new(),
             focused: false,
         }
     }
-    
-    pub fn insert_text(&mut self, text: &str) {
-        self.content.insert_str(self.cursor_position, text);
-        self.cursor_position += text.len();
-    }
-    
-    
-    pub fn move_cursor_left(&mut self) {
-        if self.cursor_position > 0 {
-            self.cursor_position -= 1;
-        }
-    }
-    
-    pub fn move_cursor_right(&mut self) {
-        if self.cursor_position < self.content.len() {
-            self.cursor_position += 1;
-        }
-    }
-    
-    pub fn get_content(&self) -> &str {
-        if let Some(ref buffer) = self.text_buffer {
-            buffer.content()
-        } else {
-            &self.content
-        }
-    }
 
-    pub fn insert_char(&mut self, ch: char) {
-        if let Some(ref mut buffer) = self.text_buffer {
-            buffer.insert_char(ch);
-        }
+    // Content access
+    pub fn content(&self) -> &str {
+        self.document.content()
     }
 
     pub fn cursor_position(&self) -> usize {
-        if let Some(ref buffer) = self.text_buffer {
-            buffer.cursor_position()
-        } else {
-            self.cursor_position
-        }
+        self.document.cursor_position()
     }
 
-    pub fn delete_char(&mut self) {
-        if let Some(ref mut buffer) = self.text_buffer {
-            buffer.delete_char();
-        } else {
-            if self.cursor_position > 0 {
-                self.cursor_position -= 1;
-                self.content.remove(self.cursor_position);
-            }
-        }
+    pub fn has_selection(&self) -> bool {
+        self.document.has_selection()
     }
 
-    pub fn handle_key_input(&mut self, ch: char) {
-        self.insert_char(ch);
-    }
-
-    pub fn handle_special_key(&mut self, key: SpecialKey) {
-        match key {
-            SpecialKey::Backspace => {
-                self.delete_char();
-            },
-            SpecialKey::ArrowLeft => {
-                if let Some(ref mut buffer) = self.text_buffer {
-                    buffer.move_cursor_left();
-                } else {
-                    self.move_cursor_left();
-                }
-            },
-            SpecialKey::ArrowRight => {
-                if let Some(ref mut buffer) = self.text_buffer {
-                    buffer.move_cursor_right();
-                } else {
-                    self.move_cursor_right();
-                }
-            },
-            SpecialKey::ArrowUp => {
-                if let Some(ref mut buffer) = self.text_buffer {
-                    buffer.move_cursor_up();
-                }
-            },
-            SpecialKey::ArrowDown => {
-                if let Some(ref mut buffer) = self.text_buffer {
-                    buffer.move_cursor_down();
-                }
-            },
-        }
-    }
-
+    // Focus management
     pub fn set_focus(&mut self, focused: bool) {
         self.focused = focused;
     }
@@ -132,16 +48,54 @@ impl MarkdownEditor {
     pub fn is_focused(&self) -> bool {
         self.focused
     }
+
+    // Input handling - delegates to keyboard handler
+    pub fn handle_char_input(&mut self, ch: char) {
+        self.keyboard_handler.handle_char_input(ch, &mut self.document);
+    }
+
+    pub fn handle_input_event(&mut self, event: InputEvent) {
+        self.keyboard_handler.handle_input_event(event, &mut self.document);
+    }
+
+    // Legacy compatibility methods for tests
+    pub fn get_content(&self) -> &str {
+        self.content()
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        self.handle_char_input(ch);
+    }
+
+    pub fn handle_key_input(&mut self, ch: char) {
+        self.handle_char_input(ch);
+    }
+
+    pub fn handle_special_key(&mut self, key: crate::input::SpecialKey) {
+        let event: InputEvent = key.into();
+        self.handle_input_event(event);
+    }
+
+    pub fn delete_char(&mut self) {
+        self.handle_input_event(InputEvent::Backspace);
+    }
+
+    // Provide access to document for more complex operations
+    pub fn document(&self) -> &TextDocument {
+        &self.document
+    }
+
+    pub fn document_mut(&mut self) -> &mut TextDocument {
+        &mut self.document
+    }
 }
 
 impl Render for MarkdownEditor {
     fn render(&mut self, _window: &mut gpui::Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let content = if let Some(ref buffer) = self.text_buffer {
-            buffer.content().to_string()
-        } else if self.content.is_empty() {
+        let content = if self.document.is_empty() {
             "Start typing your markdown content...".to_string()
         } else {
-            self.content.clone()
+            self.document.content().to_string()
         };
 
         div()
@@ -170,9 +124,18 @@ impl Render for MarkdownEditor {
 mod tests {
     use super::*;
 
+    // Helper method for backward compatibility
+    fn new_with_buffer() -> MarkdownEditor {
+        MarkdownEditor {
+            document: TextDocument::new(),
+            keyboard_handler: KeyboardHandler::new(),
+            focused: false,
+        }
+    }
+
     #[test]
     fn test_handle_keyboard_input_basic_char() {
-        let mut editor = MarkdownEditor::new_with_buffer();
+        let mut editor = new_with_buffer();
         
         // Test character input handling
         editor.handle_key_input('a');
@@ -186,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_handle_special_keys() {
-        let mut editor = MarkdownEditor::new_with_buffer();
+        let mut editor = new_with_buffer();
         
         // Type some text first
         editor.handle_key_input('h');
@@ -198,21 +161,21 @@ mod tests {
         assert_eq!(editor.cursor_position(), 5);
         
         // Test backspace key
-        editor.handle_special_key(SpecialKey::Backspace);
+        editor.handle_special_key(crate::input::SpecialKey::Backspace);
         assert_eq!(editor.get_content(), "hell");
         assert_eq!(editor.cursor_position(), 4);
         
         // Test arrow keys
-        editor.handle_special_key(SpecialKey::ArrowLeft);
+        editor.handle_special_key(crate::input::SpecialKey::ArrowLeft);
         assert_eq!(editor.cursor_position(), 3);
         
-        editor.handle_special_key(SpecialKey::ArrowRight);
+        editor.handle_special_key(crate::input::SpecialKey::ArrowRight);
         assert_eq!(editor.cursor_position(), 4);
     }
 
     #[test]
     fn test_focus_handling() {
-        let mut editor = MarkdownEditor::new_with_buffer();
+        let mut editor = new_with_buffer();
         
         // Editor should start unfocused
         assert_eq!(editor.is_focused(), false);
@@ -228,58 +191,42 @@ mod tests {
     
     #[test]
     fn test_insert_text() {
-        let mut editor = MarkdownEditor {
-            content: String::new(),
-            cursor_position: 0,
-            text_buffer: None,
-            focused: false,
-        };
-        
-        editor.insert_text("Hello");
+        let mut editor = new_with_buffer();
+        editor.document_mut().insert_text("Hello");
         assert_eq!(editor.get_content(), "Hello");
-        assert_eq!(editor.cursor_position, 5);
+        assert_eq!(editor.cursor_position(), 5);
     }
     
     #[test]
     fn test_delete_char() {
-        let mut editor = MarkdownEditor {
-            content: "Hello".to_string(),
-            cursor_position: 5,
-            text_buffer: None,
-            focused: false,
-        };
-        
+        let mut editor = MarkdownEditor::new_with_content("Hello".to_string());
         editor.delete_char();
         assert_eq!(editor.get_content(), "Hell");
-        assert_eq!(editor.cursor_position, 4);
+        assert_eq!(editor.cursor_position(), 4);
     }
     
     #[test]
     fn test_cursor_movement() {
-        let mut editor = MarkdownEditor {
-            content: "Hello".to_string(),
-            cursor_position: 3,
-            text_buffer: None,
-            focused: false,
-        };
+        let mut editor = MarkdownEditor::new_with_content("Hello".to_string());
+        editor.document_mut().set_cursor_position(3);
         
-        editor.move_cursor_left();
-        assert_eq!(editor.cursor_position, 2);
+        editor.handle_input_event(InputEvent::ArrowLeft);
+        assert_eq!(editor.cursor_position(), 2);
         
-        editor.move_cursor_right();
-        assert_eq!(editor.cursor_position, 3);
+        editor.handle_input_event(InputEvent::ArrowRight);
+        assert_eq!(editor.cursor_position(), 3);
         
-        editor.move_cursor_right();
-        editor.move_cursor_right();
-        assert_eq!(editor.cursor_position, 5);
+        editor.handle_input_event(InputEvent::ArrowRight);
+        editor.handle_input_event(InputEvent::ArrowRight);
+        assert_eq!(editor.cursor_position(), 5);
         
-        editor.move_cursor_right();
-        assert_eq!(editor.cursor_position, 5); // Should not go beyond content length
+        editor.handle_input_event(InputEvent::ArrowRight);
+        assert_eq!(editor.cursor_position(), 5); // Should not go beyond content length
     }
 
     #[test]
     fn test_editor_with_text_buffer() {
-        let mut editor = MarkdownEditor::new_with_buffer();
+        let mut editor = new_with_buffer();
         editor.insert_char('H');
         assert_eq!(editor.get_content(), "H");
         assert_eq!(editor.cursor_position(), 1);
