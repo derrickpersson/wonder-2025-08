@@ -99,6 +99,10 @@ Use the Linear MCP server to:
 - Get the next available task (usually lowest numbered ENG-XX not yet started)
 - Read full issue details including acceptance criteria
 
+### Always continue working
+- After you have completed your current Linear task. Always check Linear for the next task assigned to you, and continue with that task.
+- If there are no further tasks assigned to you, see if there's another task you can pull in from the backlog and assign it to you.
+
 ### Commit Message Format
 ```
 [ENG-XX] Brief description of change
@@ -115,7 +119,7 @@ For ticket "WE-001: Text Buffer Foundation":
 **Subtasks:**
 1. Create TextBuffer struct with basic fields
 2. Implement insert_char method with tests
-3. Implement delete_char method with tests  
+3. Implement delete_char method with tests
 4. Add cursor position tracking
 5. Handle edge cases (empty buffer, boundaries)
 

@@ -1,10 +1,12 @@
 use gpui::{
     div, prelude::*, rgb, Context, Render,
 };
+use crate::text_buffer::TextBuffer;
 
 pub struct MarkdownEditor {
     content: String,
     cursor_position: usize,
+    text_buffer: Option<TextBuffer>,
 }
 
 impl MarkdownEditor {
@@ -12,6 +14,15 @@ impl MarkdownEditor {
         Self {
             content: String::new(),
             cursor_position: 0,
+            text_buffer: None,
+        }
+    }
+
+    pub fn new_with_buffer() -> Self {
+        Self {
+            content: String::new(),
+            cursor_position: 0,
+            text_buffer: Some(TextBuffer::new()),
         }
     }
     
@@ -20,12 +31,6 @@ impl MarkdownEditor {
         self.cursor_position += text.len();
     }
     
-    pub fn delete_char(&mut self) {
-        if self.cursor_position > 0 {
-            self.cursor_position -= 1;
-            self.content.remove(self.cursor_position);
-        }
-    }
     
     pub fn move_cursor_left(&mut self) {
         if self.cursor_position > 0 {
@@ -40,7 +45,36 @@ impl MarkdownEditor {
     }
     
     pub fn get_content(&self) -> &str {
-        &self.content
+        if let Some(ref buffer) = self.text_buffer {
+            buffer.content()
+        } else {
+            &self.content
+        }
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        if let Some(ref mut buffer) = self.text_buffer {
+            buffer.insert_char(ch);
+        }
+    }
+
+    pub fn cursor_position(&self) -> usize {
+        if let Some(ref buffer) = self.text_buffer {
+            buffer.cursor_position()
+        } else {
+            self.cursor_position
+        }
+    }
+
+    pub fn delete_char(&mut self) {
+        if let Some(ref mut buffer) = self.text_buffer {
+            buffer.delete_char();
+        } else {
+            if self.cursor_position > 0 {
+                self.cursor_position -= 1;
+                self.content.remove(self.cursor_position);
+            }
+        }
     }
 }
 
@@ -81,6 +115,7 @@ mod tests {
         let mut editor = MarkdownEditor {
             content: String::new(),
             cursor_position: 0,
+            text_buffer: None,
         };
         
         editor.insert_text("Hello");
@@ -93,6 +128,7 @@ mod tests {
         let mut editor = MarkdownEditor {
             content: "Hello".to_string(),
             cursor_position: 5,
+            text_buffer: None,
         };
         
         editor.delete_char();
@@ -105,6 +141,7 @@ mod tests {
         let mut editor = MarkdownEditor {
             content: "Hello".to_string(),
             cursor_position: 3,
+            text_buffer: None,
         };
         
         editor.move_cursor_left();
@@ -119,5 +156,17 @@ mod tests {
         
         editor.move_cursor_right();
         assert_eq!(editor.cursor_position, 5); // Should not go beyond content length
+    }
+
+    #[test]
+    fn test_editor_with_text_buffer() {
+        let mut editor = MarkdownEditor::new_with_buffer();
+        editor.insert_char('H');
+        assert_eq!(editor.get_content(), "H");
+        assert_eq!(editor.cursor_position(), 1);
+        
+        editor.delete_char();
+        assert_eq!(editor.get_content(), "");
+        assert_eq!(editor.cursor_position(), 0);
     }
 }

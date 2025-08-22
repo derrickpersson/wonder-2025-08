@@ -1,5 +1,7 @@
 mod app;
 mod editor;
+mod text_buffer;
+mod markdown_parser;
 
 use gpui::*;
 
