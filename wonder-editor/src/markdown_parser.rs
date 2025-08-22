@@ -1,6 +1,13 @@
 use pulldown_cmark::{Parser, Event, Tag, TagEnd, Options};
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ParsedToken {
+    pub token_type: MarkdownToken,
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum MarkdownToken {
     Heading(u32, String),
     Paragraph(String),
@@ -116,6 +123,46 @@ impl MarkdownParser {
         
         tokens
     }
+
+    pub fn parse_with_positions(&self, markdown: &str) -> Vec<ParsedToken> {
+        let parser = Parser::new_ext(markdown, self.options);
+        let offset_iter = parser.into_offset_iter();
+        let mut tokens = Vec::new();
+        let mut current_text = String::new();
+        let mut in_heading = None;
+        let mut heading_start = 0;
+        
+        for (event, range) in offset_iter {
+            match event {
+                Event::Start(Tag::Heading { level, .. }) => {
+                    in_heading = Some(level as u32);
+                    heading_start = range.start;
+                }
+                Event::End(TagEnd::Heading(_)) => {
+                    if let Some(level) = in_heading.take() {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Heading(level, current_text.clone()),
+                            start: heading_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                    }
+                }
+                Event::Text(text) => {
+                    if in_heading.is_some() {
+                        current_text.push_str(&text);
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        tokens
+    }
+
+    pub fn find_token_at_position<'a>(&self, tokens: &'a [ParsedToken], position: usize) -> Option<&'a ParsedToken> {
+        tokens.iter().find(|token| position >= token.start && position < token.end)
+    }
 }
 
 impl Default for MarkdownParser {
@@ -181,5 +228,46 @@ mod tests {
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Bold(s) if s == "bold")));
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Italic(s) if s == "italic")));
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Code(s) if s == "code")));
+    }
+
+    #[test]
+    fn test_parsed_token_with_position() {
+        let token = ParsedToken {
+            token_type: MarkdownToken::Heading(1, "Hello".to_string()),
+            start: 0,
+            end: 7,
+        };
+        
+        assert_eq!(token.start, 0);
+        assert_eq!(token.end, 7);
+        assert!(matches!(token.token_type, MarkdownToken::Heading(1, ref s) if s == "Hello"));
+    }
+
+    #[test]
+    fn test_parse_with_positions_heading() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse_with_positions("# Hello World");
+        
+        assert_eq!(tokens.len(), 1);
+        let token = &tokens[0];
+        assert_eq!(token.start, 0);
+        assert_eq!(token.end, 13);
+        assert!(matches!(token.token_type, MarkdownToken::Heading(1, ref s) if s == "Hello World"));
+    }
+
+    #[test]
+    fn test_find_token_at_cursor() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse_with_positions("# Hello World");
+        
+        let token_at_start = parser.find_token_at_position(&tokens, 0);
+        assert!(token_at_start.is_some());
+        assert!(matches!(token_at_start.unwrap().token_type, MarkdownToken::Heading(1, ref s) if s == "Hello World"));
+        
+        let token_at_middle = parser.find_token_at_position(&tokens, 5);
+        assert!(token_at_middle.is_some());
+        
+        let token_at_end = parser.find_token_at_position(&tokens, 13);
+        assert!(token_at_end.is_none()); // Position 13 is after the token
     }
 }

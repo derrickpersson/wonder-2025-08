@@ -2,6 +2,7 @@ use gpui::{
     div, prelude::*, rgb, Context, Render, actions, Action, FocusHandle, Focusable,
     EntityInputHandler, UTF16Selection, Window, ElementInputHandler, Entity, Bounds, Pixels, Point,
     Element, App, LayoutId, IntoElement, AnyElement, TextRun, ShapedLine, px, point, size,
+    KeyDownEvent, transparent_black,
 };
 use crate::core::TextDocument;
 use crate::input::{KeyboardHandler, InputEvent};
@@ -147,6 +148,43 @@ impl MarkdownEditor {
         window.focus(&self.focus_handle);
         self.focused = true;
         cx.notify();
+    }
+
+    // Key event handler for special keys that don't go through EntityInputHandler
+    fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut gpui::Window, cx: &mut Context<Self>) {
+        match event.keystroke.key.as_str() {
+            "backspace" => {
+                self.handle_input_event(InputEvent::Backspace);
+                cx.notify();
+            }
+            "delete" => {
+                self.handle_input_event(InputEvent::Delete);
+                cx.notify();
+            }
+            "enter" => {
+                self.handle_char_input('\n');
+                cx.notify();
+            }
+            "left" => {
+                self.handle_input_event(InputEvent::ArrowLeft);
+                cx.notify();
+            }
+            "right" => {
+                self.handle_input_event(InputEvent::ArrowRight);
+                cx.notify();
+            }
+            "up" => {
+                self.handle_input_event(InputEvent::ArrowUp);
+                cx.notify();
+            }
+            "down" => {
+                self.handle_input_event(InputEvent::ArrowDown);
+                cx.notify();
+            }
+            _ => {
+                // Let other keys be handled by EntityInputHandler or ignored
+            }
+        }
     }
 
 
@@ -304,7 +342,7 @@ struct EditorElement {
 }
 
 impl Element for EditorElement {
-    type RequestLayoutState = ShapedLine;
+    type RequestLayoutState = Vec<ShapedLine>;
     type PrepaintState = ();
 
     fn id(&self) -> Option<gpui::ElementId> {
@@ -328,40 +366,85 @@ impl Element for EditorElement {
             self.content.clone()
         };
 
+        // Split text by newlines
+        let lines: Vec<&str> = text_to_display.lines().collect();
+        
         // Create text style for our content
         let font_size = px(16.0);
         let text_color = rgb(0xcdd6f4);
         
-        let text_run = TextRun {
-            len: text_to_display.len(),
-            font: gpui::Font {
-                family: "system-ui".into(),
-                features: gpui::FontFeatures::default(),
-                weight: gpui::FontWeight::NORMAL,
-                style: gpui::FontStyle::Normal,
-                fallbacks: None,
-            },
-            color: text_color.into(),
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
+        // Shape each line separately
+        let mut shaped_lines = Vec::new();
+        let mut max_width = px(0.0);
+        
+        for line in lines {
+            let line_text = if line.is_empty() {
+                // For empty lines, use a space to maintain line height
+                " ".to_string()
+            } else {
+                line.to_string()
+            };
+            
+            let text_run = TextRun {
+                len: line_text.len(),
+                font: gpui::Font {
+                    family: "system-ui".into(),
+                    features: gpui::FontFeatures::default(),
+                    weight: gpui::FontWeight::NORMAL,
+                    style: gpui::FontStyle::Normal,
+                    fallbacks: None,
+                },
+                color: text_color.into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
 
-        // Shape the text line using GPUI's text system
-        let shaped_line = window.text_system().shape_line(
-            text_to_display.into(),
-            font_size,
-            &[text_run],
-            None,
-        );
+            // Shape the text line using GPUI's text system
+            let shaped_line = window.text_system().shape_line(
+                line_text.into(),
+                font_size,
+                &[text_run],
+                None,
+            );
+            
+            max_width = max_width.max(shaped_line.width);
+            shaped_lines.push(shaped_line);
+        }
+
+        // Handle case where text ends with newline (add empty line)
+        if text_to_display.ends_with('\n') {
+            let text_run = TextRun {
+                len: 1,
+                font: gpui::Font {
+                    family: "system-ui".into(),
+                    features: gpui::FontFeatures::default(),
+                    weight: gpui::FontWeight::NORMAL,
+                    style: gpui::FontStyle::Normal,
+                    fallbacks: None,
+                },
+                color: text_color.into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            
+            let shaped_line = window.text_system().shape_line(
+                " ".into(),
+                font_size,
+                &[text_run],
+                None,
+            );
+            shaped_lines.push(shaped_line);
+        }
 
         // Calculate the size we need including padding
-        let text_width = shaped_line.width;
-        let text_height = px(24.0); // line height
+        let line_height = px(24.0);
         let padding = px(16.0);
+        let num_lines = shaped_lines.len().max(1);
         
-        let total_width = text_width + padding * 2.0;
-        let total_height = text_height + padding * 2.0;
+        let total_width = max_width + padding * 2.0;
+        let total_height = (line_height * num_lines as f32) + padding * 2.0;
 
         // Create layout with our calculated size
         let layout_id = window.request_layout(
@@ -373,7 +456,7 @@ impl Element for EditorElement {
             _cx,
         );
 
-        (layout_id, shaped_line)
+        (layout_id, shaped_lines)
     }
 
     fn prepaint(
@@ -393,7 +476,7 @@ impl Element for EditorElement {
         _id: Option<&gpui::GlobalElementId>,
         _inspector_id: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        shaped_line: &mut Self::RequestLayoutState,
+        shaped_lines: &mut Self::RequestLayoutState,
         _prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
@@ -418,14 +501,119 @@ impl Element for EditorElement {
             corner_radii: gpui::Corners::all(px(4.0)),
         });
 
-        // Paint the actual text
-        let text_origin = bounds.origin + gpui::point(px(16.0), px(16.0));
+        // Paint all text lines
+        let padding = px(16.0);
         let line_height = px(24.0);
+        let mut text_origin = bounds.origin + gpui::point(padding, padding);
         
-        shaped_line.paint(text_origin, line_height, window, cx)
-            .unwrap_or_else(|err| {
-                eprintln!("Failed to paint text: {:?}", err);
-            });
+        for shaped_line in shaped_lines.iter_mut() {
+            shaped_line.paint(text_origin, line_height, window, cx)
+                .unwrap_or_else(|err| {
+                    eprintln!("Failed to paint text line: {:?}", err);
+                });
+            
+            // Move to next line
+            text_origin.y += line_height;
+        }
+
+        // Paint cursor if focused
+        if self.focused {
+            self.paint_cursor(bounds, window, cx);
+        }
+    }
+}
+
+impl EditorElement {
+    fn paint_cursor(
+        &self,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        // Get the cursor position from the editor
+        let cursor_position = self.editor.read(cx).cursor_position();
+        
+        // Calculate which line the cursor is on and position within that line
+        let content = &self.content;
+        let chars_before_cursor: String = content.chars().take(cursor_position).collect();
+        
+        // Count newlines to determine line number
+        let line_number = chars_before_cursor.matches('\n').count();
+        
+        // Find position within the current line
+        let lines_before: Vec<&str> = chars_before_cursor.lines().collect();
+        let position_in_line = if chars_before_cursor.ends_with('\n') {
+            0
+        } else {
+            lines_before.last().map(|line| line.chars().count()).unwrap_or(cursor_position)
+        };
+        
+        // Calculate cursor position
+        let padding = px(16.0);
+        let line_height = px(24.0);
+        let font_size = px(16.0);
+        
+        // Calculate X position by shaping text on current line up to cursor
+        let cursor_x_offset = if position_in_line == 0 {
+            px(0.0)
+        } else {
+            // Get the current line's text up to cursor position
+            let current_line_text = if line_number < content.lines().count() {
+                let line = content.lines().nth(line_number).unwrap_or("");
+                line.chars().take(position_in_line).collect::<String>()
+            } else {
+                String::new()
+            };
+            
+            if current_line_text.is_empty() {
+                px(0.0)
+            } else {
+                let text_color = rgb(0xcdd6f4);
+                let text_run = TextRun {
+                    len: current_line_text.len(),
+                    font: gpui::Font {
+                        family: "system-ui".into(),
+                        features: gpui::FontFeatures::default(),
+                        weight: gpui::FontWeight::NORMAL,
+                        style: gpui::FontStyle::Normal,
+                        fallbacks: None,
+                    },
+                    color: text_color.into(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+
+                let shaped_line = window.text_system().shape_line(
+                    current_line_text.into(),
+                    font_size,
+                    &[text_run],
+                    None,
+                );
+                
+                shaped_line.width
+            }
+        };
+
+        // Create cursor bounds - a thin vertical line  
+        let cursor_x = bounds.origin.x + padding + cursor_x_offset;
+        let cursor_y = bounds.origin.y + padding + (line_height * line_number as f32);
+        
+        let cursor_bounds = Bounds {
+            origin: gpui::point(cursor_x, cursor_y),
+            size: size(px(2.0), line_height),
+        };
+
+        // Paint the cursor as a filled rectangle
+        let cursor_color = rgb(0xf38ba8); // Pink cursor color
+        window.paint_quad(gpui::PaintQuad {
+            bounds: cursor_bounds,
+            background: cursor_color.into(),
+            border_widths: gpui::Edges::all(px(0.0)),
+            border_color: transparent_black().into(),
+            border_style: gpui::BorderStyle::Solid,
+            corner_radii: gpui::Corners::all(px(0.0)),
+        });
     }
 }
 
@@ -436,6 +624,7 @@ impl IntoElement for EditorElement {
         self
     }
 }
+
 
 impl Render for MarkdownEditor {
     fn render(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -451,13 +640,26 @@ impl Render for MarkdownEditor {
             self.focused = true;
         }
 
-        // Use our custom EditorElement that properly paints text
-        EditorElement {
-            editor: cx.entity().clone(),
-            content,
-            focused: self.focused,
-            focus_handle: self.focus_handle.clone(),
-        }
+        // Use a simple div with action handlers that wraps our custom text rendering
+        div()
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::handle_backspace_action))
+            .on_action(cx.listener(Self::handle_delete_action))
+            .on_action(cx.listener(Self::handle_arrow_left_action))
+            .on_action(cx.listener(Self::handle_arrow_right_action))
+            .on_action(cx.listener(Self::handle_arrow_up_action))
+            .on_action(cx.listener(Self::handle_arrow_down_action))
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::handle_mouse_down))
+            .on_key_down(cx.listener(Self::handle_key_down))
+            .size_full()
+            .child(
+                EditorElement {
+                    editor: cx.entity().clone(),
+                    content,
+                    focused: self.focused,
+                    focus_handle: self.focus_handle.clone(),
+                }
+            )
     }
 }
 
@@ -580,11 +782,11 @@ mod tests {
         
         // Test character input handling
         editor.handle_key_input('a');
-        assert_eq!(editor.get_content(), "a");
+        assert_eq!(editor.content(), "a");
         assert_eq!(editor.cursor_position(), 1);
         
         editor.handle_key_input('b');
-        assert_eq!(editor.get_content(), "ab");
+        assert_eq!(editor.content(), "ab");
         assert_eq!(editor.cursor_position(), 2);
     }
 
@@ -598,12 +800,12 @@ mod tests {
         editor.handle_key_input('l');
         editor.handle_key_input('l');
         editor.handle_key_input('o');
-        assert_eq!(editor.get_content(), "hello");
+        assert_eq!(editor.content(), "hello");
         assert_eq!(editor.cursor_position(), 5);
         
         // Test backspace key
         editor.handle_special_key(crate::input::SpecialKey::Backspace);
-        assert_eq!(editor.get_content(), "hell");
+        assert_eq!(editor.content(), "hell");
         assert_eq!(editor.cursor_position(), 4);
         
         // Test arrow keys
@@ -653,16 +855,16 @@ mod tests {
         // Test that actions can be converted to InputEvents and handled
         editor.handle_editor_action(&EditorBackspace {});
         // Since buffer starts empty, this should have no effect
-        assert_eq!(editor.get_content(), "");
+        assert_eq!(editor.content(), "");
         
         // Add some content first
         editor.handle_char_input('a');
         editor.handle_char_input('b');
-        assert_eq!(editor.get_content(), "ab");
+        assert_eq!(editor.content(), "ab");
         
         // Now test backspace action
         editor.handle_editor_action(&EditorBackspace {});
-        assert_eq!(editor.get_content(), "a");
+        assert_eq!(editor.content(), "a");
         
         // Test arrow actions
         editor.handle_editor_action(&EditorArrowLeft {});
@@ -735,12 +937,12 @@ mod tests {
         editor.handle_char_input('l');
         editor.handle_char_input('o');
         
-        assert_eq!(editor.get_content(), "hello");
+        assert_eq!(editor.content(), "hello");
         assert_eq!(editor.cursor_position(), 5);
         
         // Test that backspace works
         editor.handle_input_event(InputEvent::Backspace);
-        assert_eq!(editor.get_content(), "hell");
+        assert_eq!(editor.content(), "hell");
         assert_eq!(editor.cursor_position(), 4);
         
         // Verify the GPUI key handler method exists by testing its compilation
@@ -752,12 +954,150 @@ mod tests {
             // This will be verified during compilation when we add the method
         }
     }
+
+    #[test]
+    fn test_basic_punctuation() {
+        let mut editor = new_with_buffer();
+        
+        // Test basic ASCII punctuation first
+        let punctuation = "!@#$%^&*()";
+        for ch in punctuation.chars() {
+            editor.handle_char_input(ch);
+        }
+        assert_eq!(editor.content(), punctuation);
+    }
+
+    #[test]
+    fn test_unicode_characters() {
+        let mut editor = new_with_buffer();
+        
+        // Test one multi-byte character at a time to identify the issue
+        editor.handle_char_input('á');
+        assert_eq!(editor.content(), "á");
+    }
+
+    #[test]
+    fn test_comprehensive_special_characters() {
+        let mut editor = new_with_buffer();
+        
+        // Test basic punctuation
+        let basic_punct = "!@#$%^&*()";
+        for ch in basic_punct.chars() {
+            editor.handle_char_input(ch);
+        }
+        assert_eq!(editor.content(), basic_punct);
+        editor.document = TextDocument::new();
+        
+        // Test brackets and quotes
+        let brackets_quotes = "()[]{}<>\"'`";
+        for ch in brackets_quotes.chars() {
+            editor.handle_char_input(ch);
+        }
+        assert_eq!(editor.content(), brackets_quotes);
+        editor.document = TextDocument::new();
+        
+        // Test symbols and operators
+        let symbols = "~-_+=|\\:;,.<>?/";
+        for ch in symbols.chars() {
+            editor.handle_char_input(ch);
+        }
+        assert_eq!(editor.content(), symbols);
+        editor.document = TextDocument::new();
+        
+        // Test accented characters (multi-byte unicode)
+        let accented = "áéíóúàèìòùâêîôû";
+        for ch in accented.chars() {
+            editor.handle_char_input(ch);
+        }
+        assert_eq!(editor.content(), accented);
+        editor.document = TextDocument::new();
+        
+        // Test unicode symbols
+        let unicode_symbols = "€£¥¢™®©±×÷";
+        for ch in unicode_symbols.chars() {
+            editor.handle_char_input(ch);
+        }
+        assert_eq!(editor.content(), unicode_symbols);
+        editor.document = TextDocument::new();
+        
+        // Test emoji (multi-byte unicode)
+        let emoji = "😀🎉💯⭐";
+        for ch in emoji.chars() {
+            editor.handle_char_input(ch);
+        }
+        assert_eq!(editor.content(), emoji);
+    }
     
+    #[test]
+    fn test_enter_key_creates_newline() {
+        let mut editor = new_with_buffer();
+        
+        // Type some text
+        editor.handle_char_input('H');
+        editor.handle_char_input('i');
+        assert_eq!(editor.content(), "Hi");
+        
+        // Press Enter (should insert newline)
+        editor.handle_char_input('\n');
+        assert_eq!(editor.content(), "Hi\n");
+        assert_eq!(editor.cursor_position(), 3);
+        
+        // Type more text after newline
+        editor.handle_char_input('W');
+        editor.handle_char_input('o');
+        editor.handle_char_input('r');
+        editor.handle_char_input('l');
+        editor.handle_char_input('d');
+        assert_eq!(editor.content(), "Hi\nWorld");
+        assert_eq!(editor.cursor_position(), 8);
+    }
+
+    #[test]
+    fn test_raw_markdown_display() {
+        let mut editor = new_with_buffer();
+        
+        // Test that markdown syntax is preserved as-is
+        editor.handle_char_input('#');
+        editor.handle_char_input(' ');
+        editor.handle_char_input('H');
+        editor.handle_char_input('e');
+        editor.handle_char_input('a');
+        editor.handle_char_input('d');
+        editor.handle_char_input('i');
+        editor.handle_char_input('n');
+        editor.handle_char_input('g');
+        assert_eq!(editor.content(), "# Heading");
+        
+        editor.handle_char_input('\n');
+        editor.handle_char_input('*');
+        editor.handle_char_input('*');
+        editor.handle_char_input('b');
+        editor.handle_char_input('o');
+        editor.handle_char_input('l');
+        editor.handle_char_input('d');
+        editor.handle_char_input('*');
+        editor.handle_char_input('*');
+        assert_eq!(editor.content(), "# Heading\n**bold**");
+        
+        // Test that spacing is preserved
+        editor.handle_char_input(' ');
+        editor.handle_char_input(' ');
+        editor.handle_char_input('*');
+        editor.handle_char_input('i');
+        editor.handle_char_input('t');
+        editor.handle_char_input('a');
+        editor.handle_char_input('l');
+        editor.handle_char_input('i');
+        editor.handle_char_input('c');
+        editor.handle_char_input('*');
+        assert_eq!(editor.content(), "# Heading\n**bold**  *italic*");
+    }
+
     #[test]
     fn test_insert_text() {
         let mut editor = new_with_buffer();
         editor.document_mut().insert_text("Hello");
-        assert_eq!(editor.get_content(), "Hello");
+        assert_eq!(editor.content(), "Hello");
         assert_eq!(editor.cursor_position(), 5);
     }
     
@@ -765,7 +1105,7 @@ mod tests {
     fn test_delete_char() {
         let mut editor = new_with_content("Hello".to_string());
         editor.delete_char();
-        assert_eq!(editor.get_content(), "Hell");
+        assert_eq!(editor.content(), "Hell");
         assert_eq!(editor.cursor_position(), 4);
     }
     
@@ -792,11 +1132,11 @@ mod tests {
     fn test_editor_with_text_buffer() {
         let mut editor = new_with_buffer();
         editor.insert_char('H');
-        assert_eq!(editor.get_content(), "H");
+        assert_eq!(editor.content(), "H");
         assert_eq!(editor.cursor_position(), 1);
         
         editor.delete_char();
-        assert_eq!(editor.get_content(), "");
+        assert_eq!(editor.content(), "");
         assert_eq!(editor.cursor_position(), 0);
     }
 }

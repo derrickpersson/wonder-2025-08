@@ -18,7 +18,7 @@ impl TextDocument {
 
     pub fn with_content(content: String) -> Self {
         let mut cursor = Cursor::new();
-        cursor.set_position(content.len());
+        cursor.set_position(content.chars().count());
         Self {
             content,
             cursor,
@@ -36,7 +36,7 @@ impl TextDocument {
     }
 
     pub fn len(&self) -> usize {
-        self.content.len()
+        self.content.chars().count()
     }
 
     // Cursor operations
@@ -45,7 +45,7 @@ impl TextDocument {
     }
 
     pub fn set_cursor_position(&mut self, position: usize) {
-        let max_pos = self.content.len();
+        let max_pos = self.content.chars().count();
         let clamped_position = position.min(max_pos);
         self.cursor.set_position(clamped_position);
         // Note: Deliberately NOT clearing selection here to support selection operations
@@ -75,7 +75,7 @@ impl TextDocument {
     }
 
     pub fn select_all(&mut self) {
-        self.cursor.set_position(self.content.len());
+        self.cursor.set_position(self.content.chars().count());
         self.selection.start(0);
     }
 
@@ -85,9 +85,10 @@ impl TextDocument {
             self.delete_selection();
         }
         
-        let position = self.cursor.position();
-        self.content.insert(position, ch);
-        self.cursor.move_right(self.content.len());
+        let char_position = self.cursor.position();
+        let byte_position = self.char_position_to_byte_position(char_position);
+        self.content.insert(byte_position, ch);
+        self.cursor.move_right(self.content.chars().count());
     }
 
     pub fn insert_text(&mut self, text: &str) {
@@ -95,10 +96,11 @@ impl TextDocument {
             self.delete_selection();
         }
         
-        let position = self.cursor.position();
-        self.content.insert_str(position, text);
-        let new_position = position + text.len();
-        self.cursor.set_position(new_position);
+        let char_position = self.cursor.position();
+        let byte_position = self.char_position_to_byte_position(char_position);
+        self.content.insert_str(byte_position, text);
+        let new_char_position = char_position + text.chars().count();
+        self.cursor.set_position(new_char_position);
     }
 
     pub fn delete_char(&mut self) -> bool {
@@ -106,9 +108,11 @@ impl TextDocument {
             return self.delete_selection();
         }
         
-        let position = self.cursor.position();
-        if position < self.content.len() {
-            self.content.remove(position);
+        let char_position = self.cursor.position();
+        let char_count = self.content.chars().count();
+        if char_position < char_count {
+            let byte_position = self.char_position_to_byte_position(char_position);
+            self.content.remove(byte_position);
             true
         } else {
             false
@@ -120,10 +124,11 @@ impl TextDocument {
             return self.delete_selection();
         }
         
-        let position = self.cursor.position();
-        if position > 0 {
+        let char_position = self.cursor.position();
+        if char_position > 0 {
             self.cursor.move_left();
-            self.content.remove(position - 1);
+            let byte_position = self.char_position_to_byte_position(char_position - 1);
+            self.content.remove(byte_position);
             true
         } else {
             false
@@ -148,7 +153,7 @@ impl TextDocument {
     }
 
     pub fn move_cursor_right(&mut self) {
-        self.cursor.move_right(self.content.len());
+        self.cursor.move_right(self.content.chars().count());
         self.selection.clear();
     }
 
@@ -178,7 +183,7 @@ impl TextDocument {
     pub fn move_to_line_end(&mut self) {
         let (line_index, _) = self.get_cursor_line_and_column();
         let lines: Vec<&str> = self.content.lines().collect();
-        let line_length = lines.get(line_index).map(|line| line.len()).unwrap_or(0);
+        let line_length = lines.get(line_index).map(|line| line.chars().count()).unwrap_or(0);
         let position = self.get_position_from_line_and_column(line_index, line_length);
         self.set_cursor_position(position);
     }
@@ -188,19 +193,20 @@ impl TextDocument {
     }
 
     pub fn move_to_document_end(&mut self) {
-        self.set_cursor_position(self.content.len());
+        self.set_cursor_position(self.content.chars().count());
     }
 
     // Helper methods for line/column calculations
     fn get_cursor_line_and_column(&self) -> (usize, usize) {
-        let position = self.cursor.position();
-        let content_up_to_cursor = &self.content[..position];
+        let char_position = self.cursor.position();
+        let chars: Vec<char> = self.content.chars().collect();
+        let content_up_to_cursor: String = chars.iter().take(char_position).collect();
         let line_index = content_up_to_cursor.matches('\n').count();
         let column = content_up_to_cursor
             .lines()
             .last()
-            .map(|line| line.len())
-            .unwrap_or(position);
+            .map(|line| line.chars().count())
+            .unwrap_or(char_position);
         (line_index, column)
     }
 
@@ -210,13 +216,21 @@ impl TextDocument {
         
         for (i, line) in lines.iter().enumerate() {
             if i == line_index {
-                position += column.min(line.len());
+                position += column.min(line.chars().count());
                 break;
             }
-            position += line.len() + 1; // +1 for newline
+            position += line.chars().count() + 1; // +1 for newline
         }
         
-        position.min(self.content.len())
+        position.min(self.content.chars().count())
+    }
+
+    fn char_position_to_byte_position(&self, char_position: usize) -> usize {
+        self.content
+            .char_indices()
+            .nth(char_position)
+            .map(|(byte_pos, _)| byte_pos)
+            .unwrap_or(self.content.len())
     }
 }
 
