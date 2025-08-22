@@ -1,5 +1,6 @@
 use super::{input_event::InputEvent, commands::{EditorCommand, CommandExecutor}};
 
+#[derive(Debug)]
 pub struct KeyboardHandler;
 
 impl KeyboardHandler {
