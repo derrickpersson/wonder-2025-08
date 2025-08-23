@@ -34,6 +34,10 @@ impl Selection {
         self.anchor
     }
 
+    pub fn anchor(&self) -> Option<usize> {
+        self.anchor
+    }
+
     pub fn length(&self, cursor_position: usize) -> usize {
         self.range(cursor_position)
             .map(|(start, end)| end - start)

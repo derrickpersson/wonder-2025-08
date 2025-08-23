@@ -331,4 +331,52 @@ mod tests {
         assert_eq!(text_runs[2].len, " more text".len());
         assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
     }
+
+    #[test]
+    fn test_selection_with_markdown_content() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Regular **bold** text";
+        
+        // Test selection that intersects with bold token - this should make the intersecting token raw
+        let text_runs = renderer.generate_mixed_text_runs(content, 12, Some(8..16));
+        
+        // Should have 3 text runs, with the bold token in raw mode due to selection
+        assert_eq!(text_runs.len(), 3);
+        
+        // First run: "Regular "
+        assert_eq!(text_runs[0].len, "Regular ".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Second run: "**bold**" (raw mode due to selection)
+        assert_eq!(text_runs[1].len, "**bold**".len());
+        assert_eq!(text_runs[1].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Third run: " text"
+        assert_eq!(text_runs[2].len, " text".len());
+        assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
+    }
+
+    #[test]
+    fn test_selection_extends_beyond_token() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Hello **world** test";
+        
+        // Selection from 6 to 15 spans the entire bold token plus some surrounding text
+        let text_runs = renderer.generate_mixed_text_runs(content, 10, Some(6..15));
+        
+        // Should have 3 text runs, with the bold token in raw mode due to selection intersection
+        assert_eq!(text_runs.len(), 3);
+        
+        // First run: "Hello "
+        assert_eq!(text_runs[0].len, "Hello ".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Second run: "**world**" (raw mode due to selection intersection)
+        assert_eq!(text_runs[1].len, "**world**".len());
+        assert_eq!(text_runs[1].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Third run: " test"
+        assert_eq!(text_runs[2].len, " test".len());
+        assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
+    }
 }

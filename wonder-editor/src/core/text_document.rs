@@ -254,6 +254,41 @@ impl TextDocument {
         self.selection.clear();
     }
 
+    // Selection extension methods
+    pub fn extend_selection_left(&mut self) {
+        // Start selection if not active
+        if !self.selection.is_active() {
+            self.selection.start(self.cursor.position());
+        }
+        
+        // Move cursor left
+        self.cursor.move_left();
+        
+        // Clear selection if cursor returns to anchor
+        if let Some(anchor) = self.selection.anchor() {
+            if self.cursor.position() == anchor {
+                self.selection.clear();
+            }
+        }
+    }
+
+    pub fn extend_selection_right(&mut self) {
+        // Start selection if not active
+        if !self.selection.is_active() {
+            self.selection.start(self.cursor.position());
+        }
+        
+        // Move cursor right
+        self.cursor.move_right(self.content.chars().count());
+        
+        // Clear selection if cursor returns to anchor
+        if let Some(anchor) = self.selection.anchor() {
+            if self.cursor.position() == anchor {
+                self.selection.clear();
+            }
+        }
+    }
+
     pub fn move_cursor_up(&mut self) {
         let (line_index, column) = self.get_cursor_line_and_column();
         if line_index > 0 {

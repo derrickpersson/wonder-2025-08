@@ -34,6 +34,8 @@ impl KeyboardHandler {
             InputEvent::ArrowRight => EditorCommand::MoveCursorRight,
             InputEvent::ArrowUp => EditorCommand::MoveCursorUp,
             InputEvent::ArrowDown => EditorCommand::MoveCursorDown,
+            InputEvent::ShiftArrowLeft => EditorCommand::ExtendSelectionLeft,
+            InputEvent::ShiftArrowRight => EditorCommand::ExtendSelectionRight,
             InputEvent::Home => EditorCommand::MoveToLineStart,
             InputEvent::End => EditorCommand::MoveToLineEnd,
             InputEvent::PageUp => EditorCommand::MoveToDocumentStart,

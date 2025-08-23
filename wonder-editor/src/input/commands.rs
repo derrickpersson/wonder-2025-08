@@ -17,6 +17,8 @@ pub enum EditorCommand {
     StartSelection,
     ClearSelection,
     SelectAll,
+    ExtendSelectionLeft,
+    ExtendSelectionRight,
     ToggleBold,
     ToggleItalic,
 }
@@ -80,6 +82,14 @@ impl CommandExecutor for TextDocument {
             }
             EditorCommand::SelectAll => {
                 self.select_all();
+                true
+            }
+            EditorCommand::ExtendSelectionLeft => {
+                self.extend_selection_left();
+                true
+            }
+            EditorCommand::ExtendSelectionRight => {
+                self.extend_selection_right();
                 true
             }
             EditorCommand::ToggleBold => {
@@ -216,5 +226,59 @@ mod tests {
         assert_eq!(doc.content(), "Hello **world");
         // Cursor should be positioned between the markers
         assert_eq!(doc.cursor_position(), 7);
+    }
+
+    #[test]
+    fn test_shift_arrow_left_extends_selection() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(5); // After "Hello"
+        
+        // First shift+left should start selection and move cursor left
+        let result = doc.execute(EditorCommand::ExtendSelectionLeft);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 4);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("o".to_string()));
+        
+        // Second shift+left should extend selection further
+        let result = doc.execute(EditorCommand::ExtendSelectionLeft);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 3);
+        assert_eq!(doc.selected_text(), Some("lo".to_string()));
+    }
+
+    #[test]
+    fn test_shift_arrow_right_extends_selection() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(5); // After "Hello"
+        
+        // First shift+right should start selection and move cursor right
+        let result = doc.execute(EditorCommand::ExtendSelectionRight);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 6);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some(" ".to_string()));
+        
+        // Second shift+right should extend selection further
+        let result = doc.execute(EditorCommand::ExtendSelectionRight);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 7);
+        assert_eq!(doc.selected_text(), Some(" w".to_string()));
+    }
+
+    #[test]
+    fn test_shift_arrow_changes_direction() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(5); // After "Hello"
+        
+        // Start with shift+right
+        doc.execute(EditorCommand::ExtendSelectionRight);
+        assert_eq!(doc.selected_text(), Some(" ".to_string()));
+        
+        // Now shift+left should reduce selection by going back
+        let result = doc.execute(EditorCommand::ExtendSelectionLeft);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 5);
+        assert!(!doc.has_selection()); // Selection should be cleared when cursor returns to anchor
     }
 }
