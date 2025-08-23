@@ -6,6 +6,8 @@ use gpui::{
 };
 use crate::core::TextDocument;
 use crate::input::{KeyboardHandler, InputEvent};
+use crate::hybrid_renderer::HybridTextRenderer;
+// use crate::hybrid_editor_element::HybridEditorElement;
 
 actions!(
     markdown_editor,
@@ -19,30 +21,34 @@ actions!(
     ]
 );
 
-#[derive(Debug)]
 pub struct MarkdownEditor {
     document: TextDocument,
     keyboard_handler: KeyboardHandler,
+    hybrid_renderer: HybridTextRenderer,
     focused: bool,
     focus_handle: FocusHandle,
 }
 
 impl MarkdownEditor {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
         Self {
             document: TextDocument::new(),
             keyboard_handler: KeyboardHandler::new(),
-            focused: false,
-            focus_handle: cx.focus_handle(),
+            hybrid_renderer: HybridTextRenderer::new(),
+            focused: true, // Start focused
+            focus_handle,
         }
     }
 
     pub fn new_with_content(content: String, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
         Self {
             document: TextDocument::with_content(content),
             keyboard_handler: KeyboardHandler::new(),
-            focused: false,
-            focus_handle: cx.focus_handle(),
+            hybrid_renderer: HybridTextRenderer::new(),
+            focused: true, // Start focused
+            focus_handle,
         }
     }
 
@@ -83,10 +89,12 @@ impl MarkdownEditor {
     // Input handling - delegates to keyboard handler
     pub fn handle_char_input(&mut self, ch: char) {
         self.keyboard_handler.handle_char_input(ch, &mut self.document);
+        // Note: No mode updates needed - hybrid renderer handles this automatically
     }
 
     pub fn handle_input_event(&mut self, event: InputEvent) {
         self.keyboard_handler.handle_input_event(event, &mut self.document);
+        // Note: No mode updates needed - hybrid renderer handles this automatically
     }
 
     // Legacy compatibility methods for tests
@@ -339,7 +347,11 @@ struct EditorElement {
     content: String,
     focused: bool,
     focus_handle: FocusHandle,
+    cursor_position: usize,
+    selection: Option<std::ops::Range<usize>>,
+    hybrid_renderer: HybridTextRenderer,
 }
+
 
 impl Element for EditorElement {
     type RequestLayoutState = Vec<ShapedLine>;
@@ -366,50 +378,76 @@ impl Element for EditorElement {
             self.content.clone()
         };
 
-        // Split text by newlines
+        // Split text by newlines and handle each line separately
         let lines: Vec<&str> = text_to_display.lines().collect();
-        
-        // Create text style for our content
         let font_size = px(16.0);
-        let text_color = rgb(0xcdd6f4);
         
-        // Shape each line separately
         let mut shaped_lines = Vec::new();
         let mut max_width = px(0.0);
+        let mut current_offset = 0;
         
         for line in lines {
             let line_text = if line.is_empty() {
-                // For empty lines, use a space to maintain line height
-                " ".to_string()
+                " ".to_string() // Empty lines need space for height
             } else {
                 line.to_string()
             };
             
-            let text_run = TextRun {
-                len: line_text.len(),
-                font: gpui::Font {
-                    family: "system-ui".into(),
-                    features: gpui::FontFeatures::default(),
-                    weight: gpui::FontWeight::NORMAL,
-                    style: gpui::FontStyle::Normal,
-                    fallbacks: None,
+            // Generate hybrid text runs for this specific line
+            let line_runs = self.hybrid_renderer.generate_mixed_text_runs(
+                &line_text,
+                if self.cursor_position >= current_offset && self.cursor_position <= current_offset + line.len() {
+                    self.cursor_position - current_offset
+                } else {
+                    usize::MAX // Cursor not in this line
                 },
-                color: text_color.into(),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
+                self.selection.as_ref().and_then(|sel| {
+                    // Adjust selection range to line-relative coordinates
+                    let line_start = current_offset;
+                    let line_end = current_offset + line.len();
+                    if sel.end > line_start && sel.start < line_end {
+                        let adjusted_start = sel.start.saturating_sub(line_start);
+                        let adjusted_end = (sel.end - line_start).min(line.len());
+                        Some(adjusted_start..adjusted_end)
+                    } else {
+                        None
+                    }
+                }),
+            );
+            
+            // If no hybrid runs, use fallback styling
+            let text_runs = if line_runs.is_empty() {
+                vec![TextRun {
+                    len: line_text.len(),
+                    font: gpui::Font {
+                        family: "system-ui".into(),
+                        features: gpui::FontFeatures::default(),
+                        weight: gpui::FontWeight::NORMAL,
+                        style: gpui::FontStyle::Normal,
+                        fallbacks: None,
+                    },
+                    color: rgb(0xcdd6f4).into(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }]
+            } else {
+                line_runs
             };
-
-            // Shape the text line using GPUI's text system
+            
+            // Shape this line with its text runs
             let shaped_line = window.text_system().shape_line(
                 line_text.into(),
                 font_size,
-                &[text_run],
+                &text_runs,
                 None,
             );
             
             max_width = max_width.max(shaped_line.width);
             shaped_lines.push(shaped_line);
+            
+            // Update offset for next line (include newline character)
+            current_offset += line.len() + 1;
         }
 
         // Handle case where text ends with newline (add empty line)
@@ -423,7 +461,7 @@ impl Element for EditorElement {
                     style: gpui::FontStyle::Normal,
                     fallbacks: None,
                 },
-                color: text_color.into(),
+                color: rgb(0xcdd6f4).into(),
                 background_color: None,
                 underline: None,
                 strikethrough: None,
@@ -578,7 +616,7 @@ impl EditorElement {
                         style: gpui::FontStyle::Normal,
                         fallbacks: None,
                     },
-                    color: text_color.into(),
+                    color: rgb(0xcdd6f4).into(),
                     background_color: None,
                     underline: None,
                     strikethrough: None,
@@ -626,21 +664,32 @@ impl IntoElement for EditorElement {
 }
 
 
+
 impl Render for MarkdownEditor {
     fn render(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = self.document.content().to_string();
-
+        let cursor_position = self.document.cursor_position();
+        let selection = if self.document.has_selection() {
+            if let Some((start, end)) = self.document.selection_range() {
+                Some(start..end)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
         // Sync our internal focused state with GPUI's focus system
         let is_gpui_focused = self.focus_handle.is_focused(window);
         self.focused = is_gpui_focused;
         
-        // Auto-focus the editor on startup if nothing else is focused
+        // Always ensure the editor is focused on startup
         if !is_gpui_focused {
             window.focus(&self.focus_handle);
-            self.focused = true;
         }
-
-        // Use a simple div with action handlers that wraps our custom text rendering
+        self.focused = true; // Force focused state
+        
+        // Use a simple div with action handlers that wraps our hybrid editor
         div()
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::handle_backspace_action))
@@ -652,13 +701,44 @@ impl Render for MarkdownEditor {
             .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::handle_mouse_down))
             .on_key_down(cx.listener(Self::handle_key_down))
             .size_full()
+            .flex()
+            .flex_col()
             .child(
-                EditorElement {
-                    editor: cx.entity().clone(),
-                    content,
-                    focused: self.focused,
-                    focus_handle: self.focus_handle.clone(),
-                }
+                // Status bar
+                div()
+                    .h(px(30.0))
+                    .w_full()
+                    .bg(rgb(0x1e1e2e))
+                    .border_b_1()
+                    .border_color(rgb(0x313244))
+                    .flex()
+                    .items_center()
+                    .px_4()
+                    .child(
+                        div()
+                            .text_color(rgb(0xa6adc8))
+                            .text_size(px(14.0))
+                            .child("Hybrid Preview - Edit anywhere!")
+                    )
+            )
+            .child(
+                // Main content area with hybrid editor
+                div()
+                    .flex_1()
+                    .w_full()
+                    .p_4()
+                    .child(
+                        // Use EditorElement with hybrid rendering capabilities
+                        EditorElement {
+                            editor: cx.entity().clone(),
+                            content,
+                            focused: self.focused,
+                            focus_handle: self.focus_handle.clone(),
+                            cursor_position,
+                            selection,
+                            hybrid_renderer: HybridTextRenderer::new(),
+                        }
+                    )
             )
     }
 }

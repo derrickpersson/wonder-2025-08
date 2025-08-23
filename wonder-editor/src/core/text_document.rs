@@ -183,7 +183,9 @@ impl TextDocument {
         let char_position = self.cursor.position();
         let byte_position = self.char_position_to_byte_position(char_position);
         self.content.insert(byte_position, ch);
-        self.cursor.move_right(self.content.chars().count());
+        // Move cursor forward by exactly 1 character position
+        let max_position = self.content.chars().count();
+        self.cursor.set_position((char_position + 1).min(max_position));
     }
 
     pub fn insert_text(&mut self, text: &str) {

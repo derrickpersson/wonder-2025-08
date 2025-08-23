@@ -20,10 +20,10 @@ pub struct ModeManager {
 }
 
 impl ModeManager {
-    /// Create a new mode manager starting in Preview mode
+    /// Create a new mode manager starting in Raw mode for empty content
     pub fn new() -> Self {
         Self {
-            current_mode: EditorMode::Preview,
+            current_mode: EditorMode::Raw, // Start in raw mode for typing
             parser: MarkdownParser::new(),
             debounce_duration: Duration::from_millis(150), // 150ms debounce
             last_cursor_move: None,

@@ -17,9 +17,11 @@ pub enum MarkdownToken {
     CodeBlock(Option<String>, String), // language, content
     Link(String, String), // text, url
     ListItem(String),
+    BlockQuote(String),
     Text(String),
 }
 
+#[derive(Clone)]
 pub struct MarkdownParser {
     options: Options,
 }
@@ -44,6 +46,8 @@ impl MarkdownParser {
         let mut in_strong = false;
         let mut in_code = false;
         let mut in_link = false;
+        let mut in_list_item = false;
+        let mut in_block_quote = false;
         let mut link_url = String::new();
         
         for event in parser {
@@ -66,6 +70,14 @@ impl MarkdownParser {
                     Tag::Link { dest_url, .. } => {
                         in_link = true;
                         link_url = dest_url.to_string();
+                    }
+                    Tag::Item => {
+                        in_list_item = true;
+                        current_text.clear();
+                    }
+                    Tag::BlockQuote => {
+                        in_block_quote = true;
+                        current_text.clear();
                     }
                     _ => {}
                 },
@@ -105,11 +117,25 @@ impl MarkdownParser {
                             in_link = false;
                         }
                     }
+                    TagEnd::Item => {
+                        if in_list_item {
+                            tokens.push(MarkdownToken::ListItem(current_text.clone()));
+                            current_text.clear();
+                            in_list_item = false;
+                        }
+                    }
+                    TagEnd::BlockQuote => {
+                        if in_block_quote {
+                            tokens.push(MarkdownToken::BlockQuote(current_text.clone()));
+                            current_text.clear();
+                            in_block_quote = false;
+                        }
+                    }
                     _ => {}
                 },
                 Event::Text(text) => {
                     current_text.push_str(&text);
-                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_code && !in_link {
+                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_code && !in_link && !in_list_item && !in_block_quote {
                         tokens.push(MarkdownToken::Text(text.to_string()));
                         current_text.clear();
                     }
@@ -141,6 +167,10 @@ impl MarkdownParser {
         let mut in_code_block = false;
         let mut code_block_start = 0;
         let mut code_block_lang = None;
+        let mut in_list_item = false;
+        let mut list_item_start = 0;
+        let mut in_block_quote = false;
+        let mut block_quote_start = 0;
         
         for (event, range) in offset_iter {
             match event {
@@ -170,6 +200,16 @@ impl MarkdownParser {
                         }
                         _ => None,
                     };
+                }
+                Event::Start(Tag::Item) => {
+                    in_list_item = true;
+                    list_item_start = range.start;
+                    current_text.clear();
+                }
+                Event::Start(Tag::BlockQuote) => {
+                    in_block_quote = true;
+                    block_quote_start = range.start;
+                    current_text.clear();
                 }
                 Event::End(TagEnd::Heading(_)) => {
                     if let Some(level) = in_heading.take() {
@@ -227,8 +267,30 @@ impl MarkdownParser {
                         in_code_block = false;
                     }
                 }
+                Event::End(TagEnd::Item) => {
+                    if in_list_item {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::ListItem(current_text.clone()),
+                            start: list_item_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_list_item = false;
+                    }
+                }
+                Event::End(TagEnd::BlockQuote) => {
+                    if in_block_quote {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::BlockQuote(current_text.clone()),
+                            start: block_quote_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_block_quote = false;
+                    }
+                }
                 Event::Text(text) => {
-                    if in_heading.is_some() || in_strong || in_emphasis || in_link || in_code_block {
+                    if in_heading.is_some() || in_strong || in_emphasis || in_link || in_code_block || in_list_item || in_block_quote {
                         current_text.push_str(&text);
                     }
                 }
@@ -444,6 +506,44 @@ mod tests {
         let context_at_plain = parser.get_current_token_context(markdown, 25);
         // Should be None since no token covers this position
         assert!(context_at_plain.current_token.is_none());
+    }
+
+    #[test]
+    fn test_parse_blockquote() {
+        let parser = MarkdownParser::new();
+        let markdown = "> This is a blockquote\n> with multiple lines";
+        let tokens = parser.parse(markdown);
+        
+        // Should find a BlockQuote token
+        let blockquotes: Vec<_> = tokens.iter()
+            .filter_map(|t| match t {
+                MarkdownToken::BlockQuote(text) => Some(text.as_str()),
+                _ => None
+            })
+            .collect();
+        
+        assert!(!blockquotes.is_empty());
+        // The exact text depends on how pulldown-cmark handles multiline blockquotes
+    }
+
+    #[test]
+    fn test_parse_list_items() {
+        let parser = MarkdownParser::new();
+        let markdown = "- First item\n- Second item\n- Third item";
+        let tokens = parser.parse(markdown);
+        
+        // Should find 3 ListItem tokens
+        let list_items: Vec<_> = tokens.iter()
+            .filter_map(|t| match t {
+                MarkdownToken::ListItem(text) => Some(text.as_str()),
+                _ => None
+            })
+            .collect();
+        
+        assert_eq!(list_items.len(), 3);
+        assert_eq!(list_items[0], "First item");
+        assert_eq!(list_items[1], "Second item");
+        assert_eq!(list_items[2], "Third item");
     }
 
     #[test]
