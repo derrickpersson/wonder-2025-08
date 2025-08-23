@@ -23,6 +23,10 @@ pub enum EditorCommand {
     MoveToWordEnd,
     ExtendSelectionToWordStart,
     ExtendSelectionToWordEnd,
+    MovePageUp,
+    MovePageDown,
+    ExtendSelectionToDocumentStart,
+    ExtendSelectionToDocumentEnd,
     ToggleBold,
     ToggleItalic,
 }
@@ -110,6 +114,22 @@ impl CommandExecutor for TextDocument {
             }
             EditorCommand::ExtendSelectionToWordEnd => {
                 self.extend_selection_to_word_end();
+                true
+            }
+            EditorCommand::MovePageUp => {
+                self.move_page_up();
+                true
+            }
+            EditorCommand::MovePageDown => {
+                self.move_page_down();
+                true
+            }
+            EditorCommand::ExtendSelectionToDocumentStart => {
+                self.extend_selection_to_document_start();
+                true
+            }
+            EditorCommand::ExtendSelectionToDocumentEnd => {
+                self.extend_selection_to_document_end();
                 true
             }
             EditorCommand::ToggleBold => {

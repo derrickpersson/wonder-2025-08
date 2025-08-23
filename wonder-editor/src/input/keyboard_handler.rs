@@ -40,10 +40,14 @@ impl KeyboardHandler {
             InputEvent::CmdArrowRight => EditorCommand::MoveToWordEnd,
             InputEvent::CmdShiftArrowLeft => EditorCommand::ExtendSelectionToWordStart,
             InputEvent::CmdShiftArrowRight => EditorCommand::ExtendSelectionToWordEnd,
+            InputEvent::CmdArrowUp => EditorCommand::MoveToDocumentStart,
+            InputEvent::CmdArrowDown => EditorCommand::MoveToDocumentEnd,
+            InputEvent::CmdShiftArrowUp => EditorCommand::ExtendSelectionToDocumentStart,
+            InputEvent::CmdShiftArrowDown => EditorCommand::ExtendSelectionToDocumentEnd,
             InputEvent::Home => EditorCommand::MoveToLineStart,
             InputEvent::End => EditorCommand::MoveToLineEnd,
-            InputEvent::PageUp => EditorCommand::MoveToDocumentStart,
-            InputEvent::PageDown => EditorCommand::MoveToDocumentEnd,
+            InputEvent::PageUp => EditorCommand::MovePageUp,
+            InputEvent::PageDown => EditorCommand::MovePageDown,
             InputEvent::Enter => EditorCommand::InsertChar('\n'),
             InputEvent::Tab => EditorCommand::InsertChar('\t'),
         }
@@ -167,5 +171,65 @@ mod tests {
         assert_eq!(doc.cursor_position(), 11);
         assert!(doc.has_selection());
         assert_eq!(doc.selected_text(), Some("rld".to_string()));
+    }
+
+    #[test]
+    fn test_keyboard_handler_cmd_up_down() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Line 1\nLine 2\nLine 3".to_string());
+        doc.set_cursor_position(8); // In "Line 2"
+        
+        // Test CmdArrowUp - should go to document start
+        let result = handler.handle_input_event(InputEvent::CmdArrowUp, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 0);
+        
+        // Test CmdArrowDown - should go to document end
+        let result = handler.handle_input_event(InputEvent::CmdArrowDown, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 20); // End of document
+    }
+
+    #[test]
+    fn test_keyboard_handler_page_navigation() {
+        let handler = KeyboardHandler::new();
+        let content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12\nLine 13\nLine 14\nLine 15".to_string();
+        let mut doc = TextDocument::with_content(content);
+        doc.set_cursor_position(50); // Somewhere in the middle
+        
+        // Test PageUp
+        let result = handler.handle_input_event(InputEvent::PageUp, &mut doc);
+        assert!(result);
+        assert!(doc.cursor_position() < 50); // Should move up
+        
+        let up_pos = doc.cursor_position();
+        
+        // Test PageDown
+        let result = handler.handle_input_event(InputEvent::PageDown, &mut doc);
+        assert!(result);
+        assert!(doc.cursor_position() > up_pos); // Should move down
+    }
+
+    #[test]
+    fn test_keyboard_handler_cmd_shift_up_down() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // In middle
+        
+        // Test CmdShiftArrowUp - should extend selection to document start
+        let result = handler.handle_input_event(InputEvent::CmdShiftArrowUp, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 0);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("Hello wo".to_string()));
+        
+        // Clear selection and test extend to document end
+        doc.clear_selection();
+        doc.set_cursor_position(8);
+        let result = handler.handle_input_event(InputEvent::CmdShiftArrowDown, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 16);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("rld test".to_string()));
     }
 }

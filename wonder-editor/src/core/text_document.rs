@@ -375,6 +375,58 @@ impl TextDocument {
         }
     }
 
+    // Page navigation methods
+    pub fn move_page_up(&mut self) {
+        // For now, implement as moving up by 10 lines (typical page size)
+        let (line_index, column) = self.get_cursor_line_and_column();
+        let target_line = line_index.saturating_sub(10);
+        let new_position = self.get_position_from_line_and_column(target_line, column);
+        self.set_cursor_position(new_position);
+        self.selection.clear();
+    }
+
+    pub fn move_page_down(&mut self) {
+        // For now, implement as moving down by 10 lines (typical page size)
+        let (line_index, column) = self.get_cursor_line_and_column();
+        let lines: Vec<&str> = self.content.lines().collect();
+        let target_line = (line_index + 10).min(lines.len().saturating_sub(1));
+        let new_position = self.get_position_from_line_and_column(target_line, column);
+        self.set_cursor_position(new_position);
+        self.selection.clear();
+    }
+
+    pub fn extend_selection_to_document_start(&mut self) {
+        // Start selection if not active
+        if !self.selection.is_active() {
+            self.selection.start(self.cursor.position());
+        }
+        
+        self.set_cursor_position(0);
+        
+        // Clear selection if cursor returns to anchor
+        if let Some(anchor) = self.selection.anchor() {
+            if self.cursor.position() == anchor {
+                self.selection.clear();
+            }
+        }
+    }
+
+    pub fn extend_selection_to_document_end(&mut self) {
+        // Start selection if not active
+        if !self.selection.is_active() {
+            self.selection.start(self.cursor.position());
+        }
+        
+        self.set_cursor_position(self.content.chars().count());
+        
+        // Clear selection if cursor returns to anchor
+        if let Some(anchor) = self.selection.anchor() {
+            if self.cursor.position() == anchor {
+                self.selection.clear();
+            }
+        }
+    }
+
     // Helper methods for word boundary detection
     fn find_word_start(&self, position: usize) -> usize {
         let chars: Vec<char> = self.content.chars().collect();
@@ -649,5 +701,56 @@ mod tests {
         doc.set_cursor_position(18); // End of document
         doc.move_to_word_end();
         assert_eq!(doc.cursor_position(), 18); // Should stay at end
+    }
+
+    #[test]
+    fn test_page_navigation() {
+        let content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12\nLine 13\nLine 14\nLine 15".to_string();
+        let mut doc = TextDocument::with_content(content);
+        doc.set_cursor_position(50); // Somewhere in the middle
+        
+        // Test page up (should move up by 10 lines)
+        doc.move_page_up();
+        assert!(doc.cursor_position() < 50); // Should move up
+        
+        let up_pos = doc.cursor_position();
+        
+        // Test page down
+        doc.move_page_down();
+        assert!(doc.cursor_position() > up_pos); // Should move down
+    }
+
+    #[test]
+    fn test_document_selection_extension() {
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // In middle of "world"
+        
+        // Test extend selection to document start
+        doc.extend_selection_to_document_start();
+        assert!(doc.has_selection());
+        assert_eq!(doc.cursor_position(), 0);
+        assert_eq!(doc.selected_text(), Some("Hello wo".to_string()));
+        
+        // Clear and test extend to document end
+        doc.clear_selection();
+        doc.set_cursor_position(8);
+        doc.extend_selection_to_document_end();
+        assert!(doc.has_selection());
+        assert_eq!(doc.cursor_position(), 16);
+        assert_eq!(doc.selected_text(), Some("rld test".to_string()));
+    }
+
+    #[test]
+    fn test_cmd_up_down_navigation() {
+        let mut doc = TextDocument::with_content("Line 1\nLine 2\nLine 3".to_string());
+        doc.set_cursor_position(8); // In "Line 2"
+        
+        // Test Cmd+Up (move to document start)
+        doc.move_to_document_start();
+        assert_eq!(doc.cursor_position(), 0);
+        
+        // Test Cmd+Down (move to document end)
+        doc.move_to_document_end();
+        assert_eq!(doc.cursor_position(), 20); // End of document
     }
 }
