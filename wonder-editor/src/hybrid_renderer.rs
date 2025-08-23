@@ -57,7 +57,7 @@ impl HybridTextRenderer {
         let token_modes = self.render_document(content, cursor_position, selection);
         
         // Build the transformed text and corresponding TextRuns
-        let (transformed_text, text_runs) = self.build_transformed_content(content, &token_modes);
+        let (_transformed_text, text_runs) = self.build_transformed_content(content, &token_modes);
         
         text_runs
     }

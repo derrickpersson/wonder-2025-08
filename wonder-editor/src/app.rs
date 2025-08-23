@@ -17,7 +17,7 @@ impl WonderApp {
 }
 
 impl Render for WonderApp {
-    fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut gpui::Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -49,7 +49,7 @@ impl Render for WonderApp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // Tests to be implemented when we set up full GPUI test infrastructure
     
     #[test]
     fn test_app_creation() {

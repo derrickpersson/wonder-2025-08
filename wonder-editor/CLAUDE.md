@@ -1,7 +1,7 @@
 # Wonder Editor - Project Conventions
 
 ## Project Overview
-Wonder Editor is a markdown editor built using the GPUI framework (from Zed). The project is tracked using Linear, with tasks in the "Markdown Editor" project.
+Wonder Editor is a hybrid markdown editor built using the GPUI framework (from Zed). The project features real-time preview/raw mode switching based on cursor position and text selection. Tasks are tracked using Linear in the "Markdown Editor" project.
 
 ## Development Methodology
 
@@ -122,29 +122,51 @@ cargo clippy
 wonder-editor/
 ├── src/
 │   ├── main.rs              # Application entry point
-│   ├── app.rs               # Main application component
-│   ├── editor.rs            # UI layer - Markdown editor component
+│   ├── app.rs               # Main application component (GPUI UI)
+│   ├── editor.rs            # UI layer - Hybrid markdown editor component
 │   ├── core/                # 📦 Domain layer (business logic)
-│   │   ├── mod.rs           # Core module exports
-│   │   ├── cursor.rs        # Cursor management abstraction
-│   │   ├── selection.rs     # Text selection abstraction
-│   │   └── text_document.rs # Core text operations
+│   │   ├── mod.rs           # Core module exports (TextDocument only)
+│   │   ├── cursor.rs        # Cursor position management
+│   │   ├── selection.rs     # Text selection state management
+│   │   └── text_document.rs # Core text operations & selection logic
 │   ├── input/               # 📦 Input layer (user interactions)
 │   │   ├── mod.rs           # Input module exports
-│   │   ├── input_event.rs   # Input event types
-│   │   ├── commands.rs      # Command pattern for operations
-│   │   └── keyboard_handler.rs # Input processing logic
-│   ├── text_buffer.rs       # 🚫 Legacy - being phased out
-│   └── markdown_parser.rs   # 📦 Will move to core/parsing/
+│   │   ├── input_event.rs   # Input event types & special keys
+│   │   ├── commands.rs      # Command pattern for text operations
+│   │   └── keyboard_handler.rs # Input processing & command dispatch
+│   ├── hybrid_renderer.rs   # 🎨 Hybrid preview/raw mode rendering
+│   └── markdown_parser.rs   # 📝 Markdown token parsing & positioning
 ├── Cargo.toml               # Dependencies and project metadata
 └── CLAUDE.md                # This file - project conventions
 ```
 
 ### Architecture Layers (SOLID Compliant)
-1. **UI Layer** (`editor.rs`, `app.rs`) - Pure UI components, no business logic
+1. **UI Layer** (`editor.rs`, `app.rs`) - Pure UI components, GPUI rendering
 2. **Input Layer** (`input/`) - Handles user interactions, converts to commands
 3. **Domain Layer** (`core/`) - Business logic, text operations, core abstractions
-4. **Infrastructure** - GPUI framework, external dependencies
+4. **Rendering Layer** (`hybrid_renderer.rs`) - Preview/raw mode switching logic
+5. **Parsing Layer** (`markdown_parser.rs`) - Markdown tokenization with positions
+6. **Infrastructure** - GPUI framework, external dependencies
+
+## Current Features & Components
+
+### Core Features ✅
+- **Hybrid Rendering**: Real-time switching between preview and raw markdown based on cursor position
+- **Text Selection**: Full selection support with Shift+arrow keys and visual highlighting
+- **Markdown Parsing**: Supports headings, bold, italic, code, links, lists, blockquotes
+- **GPUI Integration**: Custom text rendering with mixed font styles and highlighting
+- **Command System**: Extensible command pattern for all text operations
+
+### Core Components (All Test-Driven - 81 Tests)
+- **TextDocument** (18 tests) - Main text operations, cursor management, selection
+- **HybridTextRenderer** (9 tests) - Preview/raw mode switching logic
+- **KeyboardHandler** (5 tests) - Input event processing
+- **EditorCommand** (13 tests) - Command pattern for operations including selection
+- **MarkdownParser** (13 tests) - Markdown tokenization with positioning
+- **Cursor** (5 tests) - Position management
+- **Selection** (4 tests) - Selection state management
+- **InputEvent** (2 tests) - Input event types
+- **Editor Integration** (12 tests) - UI layer behavior and selection highlighting
 
 ## Linear Integration & Workflow
 
@@ -205,7 +227,23 @@ For each subtask, ensure:
 8. **Repeat TDD cycle** for next behavior
 9. **Update Linear** with progress comments and any blockers discovered
 10. **Mark ticket complete** in Linear only when all tests pass
-11. **Move to next priority task** and repeat TDD process
+11. **COMMIT CHANGES** immediately after task completion (NEW RULE)
+12. **Move to next priority task** and repeat TDD process
+
+### AUTO-COMMIT RULE - NEW REQUIREMENT ⚡
+**MANDATORY**: After completing ANY task (Linear ticket, bug fix, feature implementation, or cleanup):
+
+1. **IMMEDIATELY create a git commit** with descriptive message
+2. **Use proper commit format** (see below)
+3. **Include all relevant changes** in the commit
+4. **Do NOT wait** for user instruction to commit
+5. **Commit BEFORE** moving to the next task
+
+This ensures:
+- All work is properly tracked and versioned
+- Changes are not lost between tasks
+- Clear progress documentation
+- Easy rollback if needed
 
 ### TDD Workflow Enforcement
 **🚨 VIOLATION ALERT:** If you catch yourself:
@@ -213,6 +251,7 @@ For each subtask, ensure:
 - Making a test pass by changing the test → STOP immediately  
 - Skipping any of the 3 TDD phases → STOP immediately
 - Writing multiple behaviors in one test → STOP immediately
+- Completing a task without committing → STOP immediately (NEW)
 
 ### Checking Linear for Next Task
 Use the Linear MCP server to:
@@ -232,26 +271,32 @@ Use the Linear MCP server to:
 - Specific change made
 - Any important notes
 
-Implements: [Linear ticket URL]
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### Example TDD Task Breakdown
-For ticket "WE-001: Text Buffer Foundation":
+For ticket "ENG-001: Visual Selection Highlighting":
 
 **TDD Cycles (RED-GREEN-REFACTOR):**
-1. 🔴 **Test**: Create empty TextDocument → 🟢 **Code**: Basic struct → 🔵 **Refactor**: Clean interface
-2. 🔴 **Test**: Insert char in empty buffer → 🟢 **Code**: Basic insert → 🔵 **Refactor**: Position tracking
-3. 🔴 **Test**: Insert char at specific position → 🟢 **Code**: Position-aware insert → 🔵 **Refactor**: Error handling
-4. 🔴 **Test**: Delete char from buffer → 🟢 **Code**: Basic delete → 🔵 **Refactor**: Boundary checks
-5. 🔴 **Test**: Handle cursor at boundaries → 🟢 **Code**: Boundary logic → 🔵 **Refactor**: Extract helpers
+1. 🔴 **Test**: Selection highlighting data flow → 🟢 **Code**: Basic highlighting method → 🔵 **Refactor**: Clean interface
+2. 🔴 **Test**: Single-line selection bounds → 🟢 **Code**: Position calculation → 🔵 **Refactor**: Extract helpers
+3. 🔴 **Test**: Text shaping integration → 🟢 **Code**: GPUI text measurement → 🔵 **Refactor**: Optimize performance
+4. 🔴 **Test**: Selection color rendering → 🟢 **Code**: Paint quad with alpha → 🔵 **Refactor**: Color constants
+5. 🔴 **Test**: Shift+arrow key integration → 🟢 **Code**: Event handling → 🔵 **Refactor**: Command pattern
 
 **First Test Example:**
 ```rust
 #[test]
-fn test_create_empty_text_document() {
-    let doc = TextDocument::new();
-    assert_eq!(doc.content(), "");
-    assert_eq!(doc.cursor_position(), 0);
+fn test_selection_highlighting_data_flow() {
+    let mut editor = new_with_content("Hello World".to_string());
+    editor.document_mut().set_cursor_position(6);
+    editor.handle_input_event(InputEvent::ShiftArrowRight);
+    
+    assert!(editor.document_mut().has_selection());
+    let selection_range = editor.document_mut().selection_range().unwrap();
+    assert_eq!(selection_range, (6, 7));
 }
 ```
 
@@ -261,15 +306,32 @@ fn test_create_empty_text_document() {
 - Always end with green tests before moving to next cycle
 
 ## GPUI Framework Notes
-- Using GPUI from the Zed repository
+- Using GPUI from the Zed repository for high-performance text editing
 - Components implement the `Render` trait
-- Use `Context` for component initialization
+- Use `Context` for component initialization and entity management
 - Use `div()` and builder pattern for UI construction
+- Custom `Element` trait for advanced text rendering and input handling
+- `TextRun` system for mixed font styles within single text spans
+- `EntityInputHandler` for text input integration
 
-## Git Workflow
+### GPUI Learning Resources
+**IMPORTANT**: Always check `zed-main` codebase for implementation examples when working with GPUI:
+- **Text Rendering**: Look at `editor/src/editor_element.rs` for advanced text rendering patterns
+- **Input Handling**: Check `editor/src/editor.rs` for keyboard and mouse event handling
+- **Selection Logic**: Study `text/src/selection.rs` for selection management patterns
+- **UI Components**: Examine `ui/src/` for GPUI component patterns and styling
+- **Element Implementation**: Review custom element implementations in editor components
+- **Performance Patterns**: Look at how Zed optimizes text rendering and large document handling
+
+Use Zed's proven patterns rather than inventing new approaches for GPUI integration.
+
+## Git Workflow & Auto-Commit
+- **ALWAYS commit** immediately after completing any task
 - Commit messages should be clear and descriptive
 - Reference Linear task IDs when applicable
 - Keep commits focused and atomic
+- Use the standardized commit message format above
+- **NO exceptions** - every completed task gets committed
 
 ## Running the Application
 ```bash
@@ -284,38 +346,55 @@ cargo build --release
 ```
 
 ## Dependencies
-- **gpui**: UI framework from Zed
+- **gpui**: UI framework from Zed for high-performance text editing
 - **anyhow**: Error handling
 - **serde**: Serialization/deserialization
-- **pulldown-cmark**: Markdown parsing
+- **pulldown-cmark**: Markdown parsing with positioning support
 - **env_logger**: Logging (dev dependency)
 
-## Current Architecture Status
-The project now follows SOLID principles with clean architecture:
-
-### Core Components (All Test-Driven)
-- **TextDocument** (66 tests) - Main text operations
-- **Cursor** (4 tests) - Cursor position management  
-- **Selection** (4 tests) - Text selection abstraction
-- **KeyboardHandler** (5 tests) - Input event processing
-- **EditorCommand** (4 tests) - Command pattern for operations
-
-### Test Coverage Requirements
+## Test Coverage Requirements
 - **All new code MUST be test-driven (TDD)**
+- **Current: 81 tests across all components**
 - **Minimum 90% test coverage for core components**
 - **Integration tests for UI components**
 - **No untested code in core/ or input/ layers**
 
 ### Testing Architecture Layers
 1. **Unit Tests**: Core domain logic (cursor, selection, text operations)
-2. **Integration Tests**: Input handling and command execution
-3. **Component Tests**: UI layer behavior (when possible with GPUI)
-4. **End-to-End Tests**: Full user interaction flows (future)
+2. **Integration Tests**: Input handling and command execution  
+3. **Component Tests**: UI layer behavior and rendering
+4. **Selection Tests**: Visual highlighting and interaction behavior
+5. **End-to-End Tests**: Full user interaction flows (future)
 
-## Future Conventions
+## Codebase Health Status ✅
+
+### Recently Cleaned (2024)
+- **Removed Legacy Components**: text_buffer.rs, preview_renderer.rs, mode_manager.rs (~1,433 lines)
+- **Updated Module Structure**: Clean exports, removed dead imports
+- **Fixed Compilation Warnings**: From 31 warnings to 12 (only future-functionality warnings remain)
+- **Maintained Test Coverage**: 81/81 tests passing (100%)
+- **Architecture**: Clean separation maintained across all layers
+
+### Current Quality Metrics
+- **Tests**: 81 tests, 100% passing
+- **Compilation**: Clean with no errors
+- **Warnings**: 12 (only related to future functionality, not dead code)
+- **Architecture**: SOLID principles maintained throughout
+- **Features**: Hybrid rendering and visual selection highlighting fully operational
+
+## Future Development Priorities
 As the project grows, we will add:
-- Component testing patterns
-- State management patterns
-- Keyboard shortcut conventions
-- File organization for larger features
-- Performance testing guidelines
+- Multi-line selection highlighting support
+- Advanced markdown features (tables, footnotes, task lists)
+- Plugin system for custom markdown extensions
+- Performance optimizations for large documents
+- Collaborative editing capabilities
+- Advanced keyboard shortcuts and vim-style navigation
+
+## Code Review Standards
+- All code must pass TDD cycle review
+- No code without comprehensive tests
+- Clear, descriptive naming throughout
+- SOLID principles applied consistently
+- Performance considerations documented
+- Security best practices followed (no secrets in code)

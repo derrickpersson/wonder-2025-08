@@ -1,10 +1,7 @@
 mod app;
 mod editor;
-mod text_buffer;
 mod markdown_parser;
-mod preview_renderer;
 mod hybrid_renderer;
-// mod hybrid_editor_element;
 mod core;
 mod input;
 

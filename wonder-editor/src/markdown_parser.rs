@@ -62,7 +62,7 @@ impl MarkdownParser {
                     Tag::Strong => {
                         in_strong = true;
                     }
-                    Tag::CodeBlock(kind) => {
+                    Tag::CodeBlock(_kind) => {
                         // CodeBlockKind can be Indented or Fenced
                         in_code = true;
                         current_text.clear();

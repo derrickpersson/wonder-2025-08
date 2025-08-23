@@ -1,8 +1,8 @@
 use gpui::{
     div, prelude::*, rgb, Context, Render, actions, Action, FocusHandle, Focusable,
     EntityInputHandler, UTF16Selection, Window, ElementInputHandler, Entity, Bounds, Pixels, Point,
-    Element, App, LayoutId, IntoElement, AnyElement, TextRun, ShapedLine, px, point, size,
-    KeyDownEvent, transparent_black,
+    Element, App, LayoutId, IntoElement, TextRun, ShapedLine, px, size,
+    KeyDownEvent, transparent_black, Hsla,
 };
 use crate::core::TextDocument;
 use crate::input::{KeyboardHandler, InputEvent};
@@ -285,7 +285,7 @@ impl EntityInputHandler for MarkdownEditor {
 
     fn replace_text_in_range(
         &mut self,
-        range_utf16: Option<std::ops::Range<usize>>,
+        _range_utf16: Option<std::ops::Range<usize>>,
         new_text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -606,7 +606,7 @@ impl EditorElement {
             if current_line_text.is_empty() {
                 px(0.0)
             } else {
-                let text_color = rgb(0xcdd6f4);
+                let _text_color = rgb(0xcdd6f4);
                 let text_run = TextRun {
                     len: current_line_text.len(),
                     font: gpui::Font {
@@ -956,7 +956,7 @@ mod tests {
 
     #[test]
     fn test_focus_handle_integration() {
-        use gpui::{App, Application, WindowOptions};
+        // GPUI testing requires proper application context setup
         
         // Test that MarkdownEditor compiles with Focusable trait
         // We can't test the actual focus functionality in unit tests due to GPUI's main thread requirement,

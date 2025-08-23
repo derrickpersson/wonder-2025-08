@@ -116,7 +116,7 @@ impl TextDocument {
             
             // Replace selected text with wrapped content
             let char_start = self.byte_to_char_position(start);
-            let char_end = self.byte_to_char_position(end);
+            let _char_end = self.byte_to_char_position(end);
             
             self.content.replace_range(start..end, &wrapped_content);
             
