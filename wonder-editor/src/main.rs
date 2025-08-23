@@ -2,6 +2,7 @@ mod app;
 mod editor;
 mod text_buffer;
 mod markdown_parser;
+mod preview_renderer;
 mod core;
 mod input;
 

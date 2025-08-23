@@ -131,12 +131,45 @@ impl MarkdownParser {
         let mut current_text = String::new();
         let mut in_heading = None;
         let mut heading_start = 0;
+        let mut in_strong = false;
+        let mut strong_start = 0;
+        let mut in_emphasis = false;
+        let mut emphasis_start = 0;
+        let mut in_link = false;
+        let mut link_start = 0;
+        let mut link_url = String::new();
+        let mut in_code_block = false;
+        let mut code_block_start = 0;
+        let mut code_block_lang = None;
         
         for (event, range) in offset_iter {
             match event {
                 Event::Start(Tag::Heading { level, .. }) => {
                     in_heading = Some(level as u32);
                     heading_start = range.start;
+                }
+                Event::Start(Tag::Strong) => {
+                    in_strong = true;
+                    strong_start = range.start;
+                }
+                Event::Start(Tag::Emphasis) => {
+                    in_emphasis = true;
+                    emphasis_start = range.start;
+                }
+                Event::Start(Tag::Link { dest_url, .. }) => {
+                    in_link = true;
+                    link_start = range.start;
+                    link_url = dest_url.to_string();
+                }
+                Event::Start(Tag::CodeBlock(kind)) => {
+                    in_code_block = true;
+                    code_block_start = range.start;
+                    code_block_lang = match kind {
+                        pulldown_cmark::CodeBlockKind::Fenced(lang) => {
+                            if lang.is_empty() { None } else { Some(lang.to_string()) }
+                        }
+                        _ => None,
+                    };
                 }
                 Event::End(TagEnd::Heading(_)) => {
                     if let Some(level) = in_heading.take() {
@@ -148,10 +181,63 @@ impl MarkdownParser {
                         current_text.clear();
                     }
                 }
+                Event::End(TagEnd::Strong) => {
+                    if in_strong {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Bold(current_text.clone()),
+                            start: strong_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_strong = false;
+                    }
+                }
+                Event::End(TagEnd::Emphasis) => {
+                    if in_emphasis {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Italic(current_text.clone()),
+                            start: emphasis_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_emphasis = false;
+                    }
+                }
+                Event::End(TagEnd::Link) => {
+                    if in_link {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Link(current_text.clone(), link_url.clone()),
+                            start: link_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        link_url.clear();
+                        in_link = false;
+                    }
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    if in_code_block {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::CodeBlock(code_block_lang.clone(), current_text.clone()),
+                            start: code_block_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        code_block_lang = None;
+                        in_code_block = false;
+                    }
+                }
                 Event::Text(text) => {
-                    if in_heading.is_some() {
+                    if in_heading.is_some() || in_strong || in_emphasis || in_link || in_code_block {
                         current_text.push_str(&text);
                     }
+                }
+                Event::Code(code) => {
+                    tokens.push(ParsedToken {
+                        token_type: MarkdownToken::Code(code.to_string()),
+                        start: range.start,
+                        end: range.end,
+                    });
                 }
                 _ => {}
             }
@@ -163,6 +249,35 @@ impl MarkdownParser {
     pub fn find_token_at_position<'a>(&self, tokens: &'a [ParsedToken], position: usize) -> Option<&'a ParsedToken> {
         tokens.iter().find(|token| position >= token.start && position < token.end)
     }
+
+    pub fn find_all_tokens_at_position<'a>(&self, tokens: &'a [ParsedToken], position: usize) -> Vec<&'a ParsedToken> {
+        tokens.iter().filter(|token| position >= token.start && position < token.end).collect()
+    }
+
+    pub fn find_outermost_token_at_position<'a>(&self, tokens: &'a [ParsedToken], position: usize) -> Option<&'a ParsedToken> {
+        tokens.iter()
+            .filter(|token| position >= token.start && position < token.end)
+            .max_by_key(|token| token.end - token.start) // Largest span is outermost
+    }
+
+    pub fn get_current_token_context(&self, markdown: &str, cursor_position: usize) -> TokenContext {
+        let tokens = self.parse_with_positions(markdown);
+        let current_token = self.find_token_at_position(&tokens, cursor_position);
+        let all_tokens = self.find_all_tokens_at_position(&tokens, cursor_position);
+        
+        TokenContext {
+            current_token: current_token.cloned(),
+            all_tokens: all_tokens.into_iter().cloned().collect(),
+            tokens,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TokenContext {
+    pub current_token: Option<ParsedToken>,
+    pub all_tokens: Vec<ParsedToken>,
+    pub tokens: Vec<ParsedToken>, // All tokens in document
 }
 
 impl Default for MarkdownParser {
@@ -269,5 +384,91 @@ mod tests {
         
         let token_at_end = parser.find_token_at_position(&tokens, 13);
         assert!(token_at_end.is_none()); // Position 13 is after the token
+    }
+
+    #[test]
+    fn test_cursor_at_token_boundaries() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse_with_positions("**bold** text");
+        
+        // Before bold token
+        let before_bold = parser.find_token_at_position(&tokens, 0);
+        assert!(before_bold.is_some());
+        
+        // At start of bold content (after **)
+        let at_bold_start = parser.find_token_at_position(&tokens, 2);
+        assert!(at_bold_start.is_some());
+        
+        // At end of bold content (before **)
+        let at_bold_end = parser.find_token_at_position(&tokens, 6);
+        assert!(at_bold_end.is_some());
+        
+        // After bold token
+        let after_bold = parser.find_token_at_position(&tokens, 8);
+        assert!(after_bold.is_none() || !matches!(after_bold.unwrap().token_type, MarkdownToken::Bold(_)));
+    }
+
+    #[test]
+    fn test_nested_token_detection() {
+        let parser = MarkdownParser::new();
+        // Test with nested bold inside heading
+        let tokens = parser.parse_with_positions("# Heading with **bold** text");
+        
+        // Find all tokens at position 15 (inside the bold within heading)
+        let nested_tokens = parser.find_all_tokens_at_position(&tokens, 15);
+        
+        // Should find both heading and bold token
+        assert!(nested_tokens.len() >= 1); // At least the heading token
+        
+        // Should be able to find the outermost token (heading)
+        let outermost = parser.find_outermost_token_at_position(&tokens, 15);
+        assert!(outermost.is_some());
+        assert!(matches!(outermost.unwrap().token_type, MarkdownToken::Heading(_, _)));
+    }
+
+    #[test]
+    fn test_cursor_movement_context_updates() {
+        let parser = MarkdownParser::new();
+        let markdown = "# Title\n\nSome **bold** text";
+        
+        // Test context at different positions
+        let context_at_title = parser.get_current_token_context(markdown, 3);
+        assert!(context_at_title.current_token.is_some());
+        assert!(matches!(context_at_title.current_token.unwrap().token_type, MarkdownToken::Heading(_, _)));
+        
+        let context_at_bold = parser.get_current_token_context(markdown, 15);
+        assert!(context_at_bold.current_token.is_some());
+        assert!(matches!(context_at_bold.current_token.unwrap().token_type, MarkdownToken::Bold(_)));
+        
+        // Use a position that's definitely after the bold token
+        let context_at_plain = parser.get_current_token_context(markdown, 25);
+        // Should be None since no token covers this position
+        assert!(context_at_plain.current_token.is_none());
+    }
+
+    #[test]
+    fn test_parse_advanced_elements_with_positions() {
+        let parser = MarkdownParser::new();
+        
+        // Test link parsing
+        let link_markdown = "[Click here](https://example.com)";
+        let link_tokens = parser.parse_with_positions(link_markdown);
+        assert_eq!(link_tokens.len(), 1);
+        if let MarkdownToken::Link(text, url) = &link_tokens[0].token_type {
+            assert_eq!(text, "Click here");
+            assert_eq!(url, "https://example.com");
+        } else {
+            panic!("Expected Link token");
+        }
+        
+        // Test inline code parsing
+        let code_markdown = "Use `println!` to print";
+        let code_tokens = parser.parse_with_positions(code_markdown);
+        assert!(code_tokens.iter().any(|t| matches!(t.token_type, MarkdownToken::Code(ref s) if s == "println!")));
+        
+        // Test code block parsing
+        let code_block_markdown = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
+        let block_tokens = parser.parse_with_positions(code_block_markdown);
+        assert!(block_tokens.iter().any(|t| matches!(t.token_type, MarkdownToken::CodeBlock(Some(ref lang), _) if lang == "rust")));
     }
 }

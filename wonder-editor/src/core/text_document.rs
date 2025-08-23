@@ -79,6 +79,101 @@ impl TextDocument {
         self.selection.start(0);
     }
 
+    // Formatting operations
+    pub fn toggle_bold(&mut self) {
+        if self.has_selection() {
+            if self.selection_has_formatting("**", "**") {
+                self.remove_formatting_from_selection("**", "**");
+            } else {
+                self.wrap_selection_with("**", "**");
+            }
+        } else {
+            self.insert_text("****");
+            // Move cursor between the markers
+            self.move_cursor_left();
+            self.move_cursor_left();
+        }
+    }
+
+    pub fn toggle_italic(&mut self) {
+        if self.has_selection() {
+            if self.selection_has_formatting("*", "*") {
+                self.remove_formatting_from_selection("*", "*");
+            } else {
+                self.wrap_selection_with("*", "*");
+            }
+        } else {
+            self.insert_text("**");
+            // Move cursor between the markers
+            self.move_cursor_left();
+        }
+    }
+
+    fn wrap_selection_with(&mut self, start_marker: &str, end_marker: &str) {
+        if let Some((start, end)) = self.selection_range() {
+            let selected_content = self.content[start..end].to_string();
+            let wrapped_content = format!("{}{}{}", start_marker, selected_content, end_marker);
+            
+            // Replace selected text with wrapped content
+            let char_start = self.byte_to_char_position(start);
+            let char_end = self.byte_to_char_position(end);
+            
+            self.content.replace_range(start..end, &wrapped_content);
+            
+            // Update cursor position to end of wrapped content
+            let new_position = char_start + wrapped_content.chars().count();
+            self.cursor.set_position(new_position);
+            
+            // Clear selection
+            self.clear_selection();
+        }
+    }
+
+    fn byte_to_char_position(&self, byte_position: usize) -> usize {
+        self.content[..byte_position].chars().count()
+    }
+
+    fn selection_has_formatting(&self, start_marker: &str, end_marker: &str) -> bool {
+        if let Some((start, end)) = self.selection_range() {
+            let start_marker_len = start_marker.len();
+            let end_marker_len = end_marker.len();
+            
+            // Check if there's enough content before and after selection for markers
+            if start < start_marker_len || end + end_marker_len > self.content.len() {
+                return false;
+            }
+            
+            let before_selection = &self.content[start - start_marker_len..start];
+            let after_selection = &self.content[end..end + end_marker_len];
+            
+            before_selection == start_marker && after_selection == end_marker
+        } else {
+            false
+        }
+    }
+
+    fn remove_formatting_from_selection(&mut self, start_marker: &str, end_marker: &str) {
+        if let Some((start, end)) = self.selection_range() {
+            let start_marker_len = start_marker.len();
+            let end_marker_len = end_marker.len();
+            
+            // Remove end marker first (so positions don't change)
+            self.content.replace_range(end..end + end_marker_len, "");
+            
+            // Remove start marker
+            self.content.replace_range(start - start_marker_len..start, "");
+            
+            // Update cursor position
+            let char_start = self.byte_to_char_position(start - start_marker_len);
+            let selected_text_len = self.byte_to_char_position(end) - self.byte_to_char_position(start);
+            let new_position = char_start + selected_text_len;
+            self.cursor.set_position(new_position);
+            
+            // Clear selection
+            self.clear_selection();
+        }
+    }
+
     // Text modification
     pub fn insert_char(&mut self, ch: char) {
         if self.has_selection() {

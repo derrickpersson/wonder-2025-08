@@ -17,6 +17,8 @@ pub enum EditorCommand {
     StartSelection,
     ClearSelection,
     SelectAll,
+    ToggleBold,
+    ToggleItalic,
 }
 
 pub trait CommandExecutor {
@@ -80,6 +82,14 @@ impl CommandExecutor for TextDocument {
                 self.select_all();
                 true
             }
+            EditorCommand::ToggleBold => {
+                self.toggle_bold();
+                true
+            }
+            EditorCommand::ToggleItalic => {
+                self.toggle_italic();
+                true
+            }
         }
     }
 }
@@ -138,5 +148,73 @@ mod tests {
         let result = doc.execute(EditorCommand::ClearSelection);
         assert!(result);
         assert!(!doc.has_selection());
+    }
+
+    #[test]
+    fn test_cmd_b_wraps_selection_with_asterisks() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(0);
+        doc.start_selection();
+        doc.set_cursor_position(5); // Select "Hello"
+        
+        let result = doc.execute(EditorCommand::ToggleBold);
+        
+        assert!(result);
+        assert_eq!(doc.content(), "**Hello** world");
+        assert!(!doc.has_selection()); // Selection should be cleared after formatting
+    }
+
+    #[test]
+    fn test_cmd_i_wraps_selection_with_single_asterisk() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(6);
+        doc.start_selection();
+        doc.set_cursor_position(11); // Select "world"
+        
+        let result = doc.execute(EditorCommand::ToggleItalic);
+        
+        assert!(result);
+        assert_eq!(doc.content(), "Hello *world*");
+        assert!(!doc.has_selection()); // Selection should be cleared after formatting
+    }
+
+    #[test]
+    fn test_toggle_existing_bold_formatting() {
+        let mut doc = TextDocument::with_content("**bold text** normal".to_string());
+        doc.set_cursor_position(2);  // Inside the bold text
+        doc.start_selection();
+        doc.set_cursor_position(11); // Select "bold text"
+        
+        let result = doc.execute(EditorCommand::ToggleBold);
+        
+        assert!(result);
+        assert_eq!(doc.content(), "bold text normal");
+        assert!(!doc.has_selection());
+    }
+
+    #[test]
+    fn test_insert_bold_markers_when_no_selection() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(6); // Between "Hello" and "world"
+        
+        let result = doc.execute(EditorCommand::ToggleBold);
+        
+        assert!(result);
+        assert_eq!(doc.content(), "Hello ****world");
+        // Cursor should be positioned between the markers
+        assert_eq!(doc.cursor_position(), 8); 
+    }
+
+    #[test]
+    fn test_insert_italic_markers_when_no_selection() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(6); // Between "Hello" and "world"
+        
+        let result = doc.execute(EditorCommand::ToggleItalic);
+        
+        assert!(result);
+        assert_eq!(doc.content(), "Hello **world");
+        // Cursor should be positioned between the markers
+        assert_eq!(doc.cursor_position(), 7);
     }
 }
