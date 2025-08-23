@@ -36,6 +36,10 @@ impl KeyboardHandler {
             InputEvent::ArrowDown => EditorCommand::MoveCursorDown,
             InputEvent::ShiftArrowLeft => EditorCommand::ExtendSelectionLeft,
             InputEvent::ShiftArrowRight => EditorCommand::ExtendSelectionRight,
+            InputEvent::CmdArrowLeft => EditorCommand::MoveToWordStart,
+            InputEvent::CmdArrowRight => EditorCommand::MoveToWordEnd,
+            InputEvent::CmdShiftArrowLeft => EditorCommand::ExtendSelectionToWordStart,
+            InputEvent::CmdShiftArrowRight => EditorCommand::ExtendSelectionToWordEnd,
             InputEvent::Home => EditorCommand::MoveToLineStart,
             InputEvent::End => EditorCommand::MoveToLineEnd,
             InputEvent::PageUp => EditorCommand::MoveToDocumentStart,
@@ -121,5 +125,47 @@ mod tests {
         let result = handler.handle_input_event(InputEvent::Tab, &mut doc);
         assert!(result);
         assert_eq!(doc.content(), "\n\t");
+    }
+
+    #[test]
+    fn test_keyboard_handler_word_navigation() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // Middle of "world"
+        
+        // Test CmdArrowLeft - should go to start of word
+        let result = handler.handle_input_event(InputEvent::CmdArrowLeft, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 6); // Start of "world"
+        
+        // Test CmdArrowRight - should go to end of word
+        let result = handler.handle_input_event(InputEvent::CmdArrowRight, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 11); // End of "world"
+    }
+
+    #[test]
+    fn test_keyboard_handler_word_selection() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // Middle of "world"
+        
+        // Test CmdShiftArrowLeft - should select to start of word
+        let result = handler.handle_input_event(InputEvent::CmdShiftArrowLeft, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 6);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("wo".to_string()));
+        
+        // Clear selection
+        doc.clear_selection();
+        doc.set_cursor_position(8);
+        
+        // Test CmdShiftArrowRight - should select to end of word
+        let result = handler.handle_input_event(InputEvent::CmdShiftArrowRight, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 11);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("rld".to_string()));
     }
 }

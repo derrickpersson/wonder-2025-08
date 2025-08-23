@@ -328,6 +328,133 @@ impl TextDocument {
         self.set_cursor_position(self.content.chars().count());
     }
 
+    // Word navigation methods
+    pub fn move_to_word_start(&mut self) {
+        let position = self.find_word_start(self.cursor.position());
+        self.set_cursor_position(position);
+        self.selection.clear();
+    }
+
+    pub fn move_to_word_end(&mut self) {
+        let position = self.find_word_end(self.cursor.position());
+        self.set_cursor_position(position);
+        self.selection.clear();
+    }
+
+    pub fn extend_selection_to_word_start(&mut self) {
+        // Start selection if not active
+        if !self.selection.is_active() {
+            self.selection.start(self.cursor.position());
+        }
+        
+        let position = self.find_word_start(self.cursor.position());
+        self.set_cursor_position(position);
+        
+        // Clear selection if cursor returns to anchor
+        if let Some(anchor) = self.selection.anchor() {
+            if self.cursor.position() == anchor {
+                self.selection.clear();
+            }
+        }
+    }
+
+    pub fn extend_selection_to_word_end(&mut self) {
+        // Start selection if not active
+        if !self.selection.is_active() {
+            self.selection.start(self.cursor.position());
+        }
+        
+        let position = self.find_word_end(self.cursor.position());
+        self.set_cursor_position(position);
+        
+        // Clear selection if cursor returns to anchor
+        if let Some(anchor) = self.selection.anchor() {
+            if self.cursor.position() == anchor {
+                self.selection.clear();
+            }
+        }
+    }
+
+    // Helper methods for word boundary detection
+    fn find_word_start(&self, position: usize) -> usize {
+        let chars: Vec<char> = self.content.chars().collect();
+        
+        // If at start of document, stay there
+        if position == 0 {
+            return 0;
+        }
+        
+        let mut pos = position;
+        
+        // First, skip back over any non-word characters if we're on them
+        while pos > 0 {
+            if let Some(ch) = chars.get(pos - 1) {
+                if !ch.is_alphabetic() && !ch.is_numeric() {
+                    pos -= 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        // Then, move back to the start of the word
+        while pos > 0 {
+            if let Some(ch) = chars.get(pos - 1) {
+                if ch.is_alphabetic() || ch.is_numeric() {
+                    pos -= 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        pos
+    }
+    
+    fn find_word_end(&self, position: usize) -> usize {
+        let chars: Vec<char> = self.content.chars().collect();
+        let max_position = chars.len();
+        
+        // If at end of document, stay there
+        if position >= max_position {
+            return max_position;
+        }
+        
+        let mut pos = position;
+        
+        // First, skip forward over any non-word characters if we're on them
+        while pos < max_position {
+            if let Some(ch) = chars.get(pos) {
+                if !ch.is_alphabetic() && !ch.is_numeric() {
+                    pos += 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        // Then, move forward to the end of the word
+        while pos < max_position {
+            if let Some(ch) = chars.get(pos) {
+                if ch.is_alphabetic() || ch.is_numeric() {
+                    pos += 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        pos
+    }
+
     // Helper methods for line/column calculations
     fn get_cursor_line_and_column(&self) -> (usize, usize) {
         let char_position = self.cursor.position();
@@ -462,5 +589,65 @@ mod tests {
         
         doc.move_cursor_down();
         assert_eq!(doc.cursor_position(), 9); // Back to "Line 2"
+    }
+
+    #[test]
+    fn test_word_navigation() {
+        let mut doc = TextDocument::with_content("Hello world, this is a test".to_string());
+        doc.set_cursor_position(8); // Position in middle of "world"
+        
+        // Test move to word start - should go to start of current word "world"
+        doc.move_to_word_start();
+        assert_eq!(doc.cursor_position(), 6); // Start of "world"
+        
+        // Test move to word end - should go to end of current word "world"  
+        doc.move_to_word_end();
+        assert_eq!(doc.cursor_position(), 11); // End of "world"
+        
+        // Test from punctuation - cursor at comma
+        doc.set_cursor_position(11); // At comma after "world"
+        doc.move_to_word_start();
+        assert_eq!(doc.cursor_position(), 6); // Should go to start of "world"
+    }
+
+    #[test]
+    fn test_word_selection_extension() {
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // In middle of "world"
+        
+        // Test extend selection to word start
+        doc.extend_selection_to_word_start();
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("wo".to_string())); // "wo" from "world"
+        
+        // Clear selection and test extend to word end
+        doc.clear_selection();
+        doc.set_cursor_position(8);
+        doc.extend_selection_to_word_end();
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("rld".to_string())); // "rld" from "world"
+    }
+
+    #[test]
+    fn test_word_navigation_edge_cases() {
+        let mut doc = TextDocument::with_content("start, middle; end".to_string());
+        
+        // Test from punctuation 
+        doc.set_cursor_position(5); // At comma - should go back to start of "start"
+        doc.move_to_word_start();
+        assert_eq!(doc.cursor_position(), 0); // Should go to start of "start"
+        
+        doc.set_cursor_position(5); // At comma - should jump forward to end of "middle"  
+        doc.move_to_word_end();
+        assert_eq!(doc.cursor_position(), 13); // Should go to end of "middle" (position 13)
+        
+        // Test at word boundaries
+        doc.set_cursor_position(0); // Start of document
+        doc.move_to_word_start();
+        assert_eq!(doc.cursor_position(), 0); // Should stay at start
+        
+        doc.set_cursor_position(18); // End of document
+        doc.move_to_word_end();
+        assert_eq!(doc.cursor_position(), 18); // Should stay at end
     }
 }

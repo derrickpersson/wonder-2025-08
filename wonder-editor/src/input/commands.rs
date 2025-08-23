@@ -19,6 +19,10 @@ pub enum EditorCommand {
     SelectAll,
     ExtendSelectionLeft,
     ExtendSelectionRight,
+    MoveToWordStart,
+    MoveToWordEnd,
+    ExtendSelectionToWordStart,
+    ExtendSelectionToWordEnd,
     ToggleBold,
     ToggleItalic,
 }
@@ -90,6 +94,22 @@ impl CommandExecutor for TextDocument {
             }
             EditorCommand::ExtendSelectionRight => {
                 self.extend_selection_right();
+                true
+            }
+            EditorCommand::MoveToWordStart => {
+                self.move_to_word_start();
+                true
+            }
+            EditorCommand::MoveToWordEnd => {
+                self.move_to_word_end();
+                true
+            }
+            EditorCommand::ExtendSelectionToWordStart => {
+                self.extend_selection_to_word_start();
+                true
+            }
+            EditorCommand::ExtendSelectionToWordEnd => {
+                self.extend_selection_to_word_end();
                 true
             }
             EditorCommand::ToggleBold => {
