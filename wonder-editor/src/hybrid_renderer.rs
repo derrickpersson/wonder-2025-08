@@ -1,6 +1,6 @@
 use std::ops::Range;
-use crate::markdown_parser::{ParsedToken, MarkdownParser};
-use gpui::{TextRun, px, rgb, Font, FontFeatures, FontWeight, FontStyle};
+use crate::markdown_parser::{ParsedToken, MarkdownParser, MarkdownToken};
+use gpui::{TextRun, rgb, Font, FontFeatures, FontWeight, FontStyle};
 
 fn ranges_intersect(sel_start: usize, sel_end: usize, token_start: usize, token_end: usize) -> bool {
     sel_start <= token_end && sel_end >= token_start
@@ -56,66 +56,114 @@ impl HybridTextRenderer {
         
         let token_modes = self.render_document(content, cursor_position, selection);
         
-        // Create a list of text segments with their render modes
-        let mut segments = Vec::new();
-        let mut last_end = 0;
+        // Build the transformed text and corresponding TextRuns
+        let (transformed_text, text_runs) = self.build_transformed_content(content, &token_modes);
         
-        for (token, mode) in token_modes {
-            // Add text before this token as normal text (if any)
-            if token.start > last_end {
-                segments.push((last_end, token.start, TokenRenderMode::Preview));
-            }
-            
-            // Add this token with its determined mode
-            segments.push((token.start, token.end, mode));
-            last_end = token.end;
-        }
-        
-        // Add any remaining text after the last token
-        if last_end < content.len() {
-            segments.push((last_end, content.len(), TokenRenderMode::Preview));
-        }
-        
-        // If no tokens, render entire content as preview
-        if segments.is_empty() {
-            segments.push((0, content.len(), TokenRenderMode::Preview));
-        }
-        
-        // Convert segments to TextRuns with appropriate styling
+        text_runs
+    }
+    
+    fn build_transformed_content(&self, original_content: &str, token_modes: &[(ParsedToken, TokenRenderMode)]) -> (String, Vec<TextRun>) {
+        let mut transformed_text = String::new();
         let mut text_runs = Vec::new();
-        for (start, end, mode) in segments {
-            if start < end {
-                let len = end - start;
-                let (font_weight, color) = match mode {
-                    TokenRenderMode::Raw => {
-                        // Raw mode: normal weight, lighter color to show it's being edited
-                        (FontWeight::NORMAL, rgb(0x94a3b8)) // Slightly dimmed
-                    }
-                    TokenRenderMode::Preview => {
-                        // Preview mode: bold weight, bright color to show it's formatted
-                        (FontWeight::BOLD, rgb(0xcdd6f4)) // Normal bright color
-                    }
-                };
+        let mut current_pos = 0;
+        
+        // Sort tokens by start position to process them in order
+        let mut sorted_tokens: Vec<_> = token_modes.iter().collect();
+        sorted_tokens.sort_by_key(|(token, _)| token.start);
+        
+        for (token, mode) in sorted_tokens {
+            // Add any text before this token
+            if token.start > current_pos {
+                let before_text = &original_content[current_pos..token.start];
+                transformed_text.push_str(before_text);
                 
+                // Add TextRun for the text before token (always preview mode for regular text)
                 text_runs.push(TextRun {
-                    len,
+                    len: before_text.len(),
                     font: Font {
                         family: "system-ui".into(),
                         features: FontFeatures::default(),
-                        weight: font_weight,
+                        weight: FontWeight::NORMAL,
                         style: FontStyle::Normal,
                         fallbacks: None,
                     },
-                    color: color.into(),
+                    color: rgb(0xcdd6f4).into(),
                     background_color: None,
                     underline: Default::default(),
                     strikethrough: Default::default(),
                 });
             }
+            
+            // Handle the token based on its mode
+            let (display_text, font_weight, font_style, color) = match mode {
+                TokenRenderMode::Raw => {
+                    // Raw mode: show original markdown syntax
+                    let original_text = &original_content[token.start..token.end];
+                    (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x94a3b8))
+                }
+                TokenRenderMode::Preview => {
+                    // Preview mode: show formatted content
+                    match &token.token_type {
+                        MarkdownToken::Bold(inner_content) => {
+                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4))
+                        }
+                        MarkdownToken::Italic(inner_content) => {
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, rgb(0xcdd6f4))
+                        }
+                        _ => {
+                            // For other tokens, show original text
+                            let original_text = &original_content[token.start..token.end];
+                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4))
+                        }
+                    }
+                }
+            };
+            
+            transformed_text.push_str(&display_text);
+            
+            // Add TextRun for this token
+            text_runs.push(TextRun {
+                len: display_text.len(),
+                font: Font {
+                    family: "system-ui".into(),
+                    features: FontFeatures::default(),
+                    weight: font_weight,
+                    style: font_style,
+                    fallbacks: None,
+                },
+                color: color.into(),
+                background_color: None,
+                underline: Default::default(),
+                strikethrough: Default::default(),
+            });
+            
+            current_pos = token.end;
         }
         
-        text_runs
+        // Add any remaining text after the last token
+        if current_pos < original_content.len() {
+            let remaining_text = &original_content[current_pos..];
+            transformed_text.push_str(remaining_text);
+            
+            text_runs.push(TextRun {
+                len: remaining_text.len(),
+                font: Font {
+                    family: "system-ui".into(),
+                    features: FontFeatures::default(),
+                    weight: FontWeight::NORMAL,
+                    style: FontStyle::Normal,
+                    fallbacks: None,
+                },
+                color: rgb(0xcdd6f4).into(),
+                background_color: None,
+                underline: Default::default(),
+                strikethrough: Default::default(),
+            });
+        }
+        
+        (transformed_text, text_runs)
     }
+    
 }
 
 #[cfg(test)]
@@ -207,5 +255,80 @@ mod tests {
         if let Some((_, mode)) = heading_token {
             assert_eq!(*mode, TokenRenderMode::Raw);
         }
+    }
+
+    #[test]
+    fn test_content_transformation_bold_preview() {
+        let renderer = HybridTextRenderer::new();
+        let content = "**bold text**";
+        
+        // With cursor outside token, bold should be in preview mode
+        let text_runs = renderer.generate_mixed_text_runs(content, 100, None);
+        
+        // Should have exactly one text run for the transformed content
+        assert_eq!(text_runs.len(), 1);
+        
+        // The text run should be for "bold text" (without asterisks) and bold weight
+        let run = &text_runs[0];
+        assert_eq!(run.len, "bold text".len());
+        assert_eq!(run.font.weight, gpui::FontWeight::BOLD);
+    }
+
+    #[test]
+    fn test_content_transformation_italic_preview() {
+        let renderer = HybridTextRenderer::new();
+        let content = "*italic text*";
+        
+        // With cursor outside token, italic should be in preview mode
+        let text_runs = renderer.generate_mixed_text_runs(content, 100, None);
+        
+        // Should have exactly one text run for the transformed content
+        assert_eq!(text_runs.len(), 1);
+        
+        // The text run should be for "italic text" (without asterisks) and italic style
+        let run = &text_runs[0];
+        assert_eq!(run.len, "italic text".len());
+        assert_eq!(run.font.style, gpui::FontStyle::Italic);
+    }
+
+    #[test]
+    fn test_content_transformation_bold_raw() {
+        let renderer = HybridTextRenderer::new();
+        let content = "**bold text**";
+        
+        // With cursor inside token (position 5), bold should be in raw mode
+        let text_runs = renderer.generate_mixed_text_runs(content, 5, None);
+        
+        // Should have exactly one text run for the original markdown
+        assert_eq!(text_runs.len(), 1);
+        
+        // The text run should be for the full "**bold text**" and normal weight
+        let run = &text_runs[0];
+        assert_eq!(run.len, "**bold text**".len());
+        assert_eq!(run.font.weight, gpui::FontWeight::NORMAL);
+    }
+
+    #[test]
+    fn test_mixed_content_with_bold_and_text() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Regular text **bold text** more text";
+        
+        // With cursor outside all tokens, bold should be in preview mode
+        let text_runs = renderer.generate_mixed_text_runs(content, 100, None);
+        
+        // Should have 3 text runs: regular text, bold text (transformed), more text
+        assert_eq!(text_runs.len(), 3);
+        
+        // First run: "Regular text "
+        assert_eq!(text_runs[0].len, "Regular text ".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Second run: "bold text" (transformed from **bold text**)
+        assert_eq!(text_runs[1].len, "bold text".len());
+        assert_eq!(text_runs[1].font.weight, gpui::FontWeight::BOLD);
+        
+        // Third run: " more text"
+        assert_eq!(text_runs[2].len, " more text".len());
+        assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
     }
 }
