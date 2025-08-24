@@ -224,11 +224,12 @@ For each subtask, ensure:
 5. **Start with first failing test** (RED phase) - NO EXCEPTIONS
 6. **Make it pass minimally** (GREEN phase)
 7. **Refactor while tests are green** (REFACTOR phase)
-8. **Repeat TDD cycle** for next behavior
-9. **Update Linear** with progress comments and any blockers discovered
-10. **Mark ticket complete** in Linear only when all tests pass
-11. **COMMIT CHANGES** immediately after task completion (NEW RULE)
-12. **Move to next priority task** and repeat TDD process
+8. **FOR INPUT/KEYBOARD FEATURES**: Follow INTEGRATION_CHECKLIST.md COMPLETELY
+9. **Repeat TDD cycle** for next behavior
+10. **Update Linear** with progress comments and any blockers discovered
+11. **Mark ticket complete** in Linear only when all tests pass
+12. **COMMIT CHANGES** immediately after task completion (NEW RULE)
+13. **Move to next priority task** and repeat TDD process
 
 ### AUTO-COMMIT RULE - NEW REQUIREMENT ⚡
 **MANDATORY**: After completing ANY task (Linear ticket, bug fix, feature implementation, or cleanup):
@@ -354,10 +355,11 @@ cargo build --release
 
 ## Test Coverage Requirements
 - **All new code MUST be test-driven (TDD)**
-- **Current: 81 tests across all components**
+- **Current: 94 tests across all components** (updated)
 - **Minimum 90% test coverage for core components**
 - **Integration tests for UI components**
 - **No untested code in core/ or input/ layers**
+- **MANDATORY: Full integration tests for input features (see INTEGRATION_CHECKLIST.md)**
 
 ### Testing Architecture Layers
 1. **Unit Tests**: Core domain logic (cursor, selection, text operations)
