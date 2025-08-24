@@ -54,10 +54,15 @@ impl HybridTextRenderer {
             return vec![];
         }
         
-        let token_modes = self.render_document(content, cursor_position, selection);
+        let token_modes = self.render_document(content, cursor_position, selection.clone());
         
         // Build the transformed text and corresponding TextRuns
-        let (_transformed_text, text_runs) = self.build_transformed_content(content, &token_modes);
+        let (_transformed_text, mut text_runs) = self.build_transformed_content(content, &token_modes);
+        
+        // Apply selection highlighting if there's a selection
+        if let Some(sel) = selection {
+            text_runs = self.apply_selection_highlighting(text_runs, content, sel);
+        }
         
         text_runs
     }
@@ -162,6 +167,72 @@ impl HybridTextRenderer {
         }
         
         (transformed_text, text_runs)
+    }
+    
+    fn apply_selection_highlighting(&self, text_runs: Vec<TextRun>, _content: &str, selection: Range<usize>) -> Vec<TextRun> {
+        let mut highlighted_runs = Vec::new();
+        let mut current_pos = 0;
+        let selection_color = rgb(0x4c7cf9).into(); // Blue highlight color
+        
+        for run in text_runs {
+            let run_start = current_pos;
+            let run_end = current_pos + run.len;
+            
+            // Check if this run intersects with the selection
+            if selection.start < run_end && selection.end > run_start {
+                // Calculate intersection boundaries
+                let highlight_start = selection.start.max(run_start);
+                let highlight_end = selection.end.min(run_end);
+                
+                // Split the run into up to 3 parts: before, highlighted, after
+                
+                // Part 1: Before highlight (if any)
+                if highlight_start > run_start {
+                    let before_len = highlight_start - run_start;
+                    highlighted_runs.push(TextRun {
+                        len: before_len,
+                        font: run.font.clone(),
+                        color: run.color,
+                        background_color: run.background_color,
+                        underline: run.underline.clone(),
+                        strikethrough: run.strikethrough.clone(),
+                    });
+                }
+                
+                // Part 2: Highlighted section
+                if highlight_end > highlight_start {
+                    let highlight_len = highlight_end - highlight_start;
+                    highlighted_runs.push(TextRun {
+                        len: highlight_len,
+                        font: run.font.clone(),
+                        color: run.color,
+                        background_color: Some(selection_color),
+                        underline: run.underline.clone(),
+                        strikethrough: run.strikethrough.clone(),
+                    });
+                }
+                
+                // Part 3: After highlight (if any)
+                if run_end > highlight_end {
+                    let after_len = run_end - highlight_end;
+                    highlighted_runs.push(TextRun {
+                        len: after_len,
+                        font: run.font,
+                        color: run.color,
+                        background_color: run.background_color,
+                        underline: run.underline,
+                        strikethrough: run.strikethrough,
+                    });
+                }
+            } else {
+                // No intersection with selection, keep original run
+                highlighted_runs.push(run);
+            }
+            
+            current_pos = run_end;
+        }
+        
+        highlighted_runs
     }
     
 }
@@ -378,5 +449,28 @@ mod tests {
         // Third run: " test"
         assert_eq!(text_runs[2].len, " test".len());
         assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
+    }
+
+    #[test]
+    fn test_selection_background_highlighting() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Hello world";
+        
+        // Selection from position 2 to 7 ("llo w")
+        let text_runs = renderer.generate_mixed_text_runs(content, 5, Some(2..7));
+        
+        // Find text runs that should have background highlighting
+        let mut found_highlighted = false;
+        for run in &text_runs {
+            if run.background_color.is_some() {
+                found_highlighted = true;
+                // Check that it has the selection highlight color
+                let selection_color = rgb(0x4c7cf9).into();
+                assert_eq!(run.background_color.unwrap(), selection_color);
+            }
+        }
+        
+        // Should have at least one text run with background highlighting
+        assert!(found_highlighted, "No text runs found with selection background highlighting");
     }
 }

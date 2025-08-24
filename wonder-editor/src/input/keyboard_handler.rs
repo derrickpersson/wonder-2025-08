@@ -50,6 +50,7 @@ impl KeyboardHandler {
             InputEvent::PageDown => EditorCommand::MovePageDown,
             InputEvent::Enter => EditorCommand::InsertChar('\n'),
             InputEvent::Tab => EditorCommand::InsertChar('\t'),
+            InputEvent::CmdA => EditorCommand::SelectAll,
         }
     }
 }
@@ -231,5 +232,19 @@ mod tests {
         assert_eq!(doc.cursor_position(), 16);
         assert!(doc.has_selection());
         assert_eq!(doc.selected_text(), Some("rld test".to_string()));
+    }
+
+    #[test]
+    fn test_keyboard_handler_cmd_a_select_all() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // In middle
+        
+        // Test CmdA - should select all text
+        let result = handler.handle_input_event(InputEvent::CmdA, &mut doc);
+        assert!(result);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("Hello world test".to_string()));
+        assert_eq!(doc.cursor_position(), 16); // At end
     }
 }

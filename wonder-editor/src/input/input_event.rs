@@ -23,6 +23,7 @@ pub enum InputEvent {
     PageDown,
     Enter,
     Tab,
+    CmdA,
 }
 
 impl InputEvent {
@@ -55,6 +56,7 @@ pub enum SpecialKey {
     PageDown,
     Enter,
     Tab,
+    CmdA,
 }
 
 impl From<SpecialKey> for InputEvent {
@@ -82,6 +84,7 @@ impl From<SpecialKey> for InputEvent {
             SpecialKey::PageDown => InputEvent::PageDown,
             SpecialKey::Enter => InputEvent::Enter,
             SpecialKey::Tab => InputEvent::Tab,
+            SpecialKey::CmdA => InputEvent::CmdA,
         }
     }
 }
@@ -103,5 +106,11 @@ mod tests {
         
         let arrow_event: InputEvent = SpecialKey::ArrowLeft.into();
         assert_eq!(arrow_event, InputEvent::ArrowLeft);
+    }
+
+    #[test]
+    fn test_cmd_a_select_all_event() {
+        let select_all_event: InputEvent = SpecialKey::CmdA.into();
+        assert_eq!(select_all_event, InputEvent::CmdA);
     }
 }

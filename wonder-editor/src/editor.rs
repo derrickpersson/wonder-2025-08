@@ -18,6 +18,19 @@ actions!(
         EditorArrowRight,
         EditorArrowUp,
         EditorArrowDown,
+        EditorCmdArrowLeft,
+        EditorCmdArrowRight,
+        EditorCmdArrowUp,
+        EditorCmdArrowDown,
+        EditorCmdShiftArrowLeft,
+        EditorCmdShiftArrowRight,
+        EditorCmdShiftArrowUp,
+        EditorCmdShiftArrowDown,
+        EditorHome,
+        EditorEnd,
+        EditorPageUp,
+        EditorPageDown,
+        EditorSelectAll,
     ]
 );
 
@@ -218,6 +231,32 @@ impl MarkdownEditor {
             Some(InputEvent::ArrowUp)
         } else if action.type_id() == std::any::TypeId::of::<EditorArrowDown>() {
             Some(InputEvent::ArrowDown)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowLeft>() {
+            Some(InputEvent::CmdArrowLeft)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowRight>() {
+            Some(InputEvent::CmdArrowRight)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowUp>() {
+            Some(InputEvent::CmdArrowUp)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowDown>() {
+            Some(InputEvent::CmdArrowDown)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowLeft>() {
+            Some(InputEvent::CmdShiftArrowLeft)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowRight>() {
+            Some(InputEvent::CmdShiftArrowRight)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowUp>() {
+            Some(InputEvent::CmdShiftArrowUp)
+        } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowDown>() {
+            Some(InputEvent::CmdShiftArrowDown)
+        } else if action.type_id() == std::any::TypeId::of::<EditorHome>() {
+            Some(InputEvent::Home)
+        } else if action.type_id() == std::any::TypeId::of::<EditorEnd>() {
+            Some(InputEvent::End)
+        } else if action.type_id() == std::any::TypeId::of::<EditorPageUp>() {
+            Some(InputEvent::PageUp)
+        } else if action.type_id() == std::any::TypeId::of::<EditorPageDown>() {
+            Some(InputEvent::PageDown)
+        } else if action.type_id() == std::any::TypeId::of::<EditorSelectAll>() {
+            Some(InputEvent::CmdA)
         } else {
             None
         }
@@ -836,9 +875,47 @@ mod tests {
                 Some(InputEvent::ArrowUp)
             } else if action.type_id() == std::any::TypeId::of::<EditorArrowDown>() {
                 Some(InputEvent::ArrowDown)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowLeft>() {
+                Some(InputEvent::CmdArrowLeft)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowRight>() {
+                Some(InputEvent::CmdArrowRight)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowUp>() {
+                Some(InputEvent::CmdArrowUp)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdArrowDown>() {
+                Some(InputEvent::CmdArrowDown)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowLeft>() {
+                Some(InputEvent::CmdShiftArrowLeft)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowRight>() {
+                Some(InputEvent::CmdShiftArrowRight)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowUp>() {
+                Some(InputEvent::CmdShiftArrowUp)
+            } else if action.type_id() == std::any::TypeId::of::<EditorCmdShiftArrowDown>() {
+                Some(InputEvent::CmdShiftArrowDown)
+            } else if action.type_id() == std::any::TypeId::of::<EditorHome>() {
+                Some(InputEvent::Home)
+            } else if action.type_id() == std::any::TypeId::of::<EditorEnd>() {
+                Some(InputEvent::End)
+            } else if action.type_id() == std::any::TypeId::of::<EditorPageUp>() {
+                Some(InputEvent::PageUp)
+            } else if action.type_id() == std::any::TypeId::of::<EditorPageDown>() {
+                Some(InputEvent::PageDown)
+            } else if action.type_id() == std::any::TypeId::of::<EditorSelectAll>() {
+                Some(InputEvent::CmdA)
             } else {
                 None
             }
+        }
+        
+        pub fn set_cursor_position(&mut self, position: usize) {
+            self.document.set_cursor_position(position);
+        }
+        
+        pub fn has_selection(&self) -> bool {
+            self.document.has_selection()
+        }
+        
+        pub fn clear_selection(&mut self) {
+            self.document.clear_selection();
         }
     }
     
@@ -952,6 +1029,74 @@ mod tests {
         
         editor.handle_editor_action(&EditorArrowRight {});
         assert_eq!(editor.cursor_position(), 1);
+    }
+
+    #[test]
+    fn test_advanced_navigation_actions() {
+        let mut editor = new_with_buffer();
+        editor.handle_char_input('H');
+        editor.handle_char_input('e');
+        editor.handle_char_input('l');
+        editor.handle_char_input('l');
+        editor.handle_char_input('o');
+        editor.handle_char_input(' ');
+        editor.handle_char_input('w');
+        editor.handle_char_input('o');
+        editor.handle_char_input('r');
+        editor.handle_char_input('l');
+        editor.handle_char_input('d');
+        // Content: "Hello world", cursor at end (position 11)
+        
+        // Test word navigation actions
+        editor.handle_editor_action(&EditorCmdArrowLeft {});
+        assert_eq!(editor.cursor_position(), 6); // Start of "world"
+        
+        editor.handle_editor_action(&EditorCmdArrowRight {});
+        assert_eq!(editor.cursor_position(), 11); // End of "world"
+        
+        // Test document navigation actions
+        editor.handle_editor_action(&EditorCmdArrowUp {});
+        assert_eq!(editor.cursor_position(), 0); // Start of document
+        
+        editor.handle_editor_action(&EditorCmdArrowDown {});
+        assert_eq!(editor.cursor_position(), 11); // End of document
+        
+        // Test Home/End actions
+        editor.handle_editor_action(&EditorHome {});
+        assert_eq!(editor.cursor_position(), 0); // Start of line
+        
+        editor.handle_editor_action(&EditorEnd {});
+        assert_eq!(editor.cursor_position(), 11); // End of line
+    }
+
+    #[test]
+    fn test_selection_extension_actions() {
+        let mut editor = new_with_buffer();
+        editor.handle_char_input('H');
+        editor.handle_char_input('e');
+        editor.handle_char_input('l');
+        editor.handle_char_input('l');
+        editor.handle_char_input('o');
+        editor.handle_char_input(' ');
+        editor.handle_char_input('w');
+        editor.handle_char_input('o');
+        editor.handle_char_input('r');
+        editor.handle_char_input('l');
+        editor.handle_char_input('d');
+        // Content: "Hello world", cursor at end (position 11)
+        editor.set_cursor_position(8); // In middle of "world"
+        
+        // Test word selection extension actions
+        editor.handle_editor_action(&EditorCmdShiftArrowLeft {});
+        assert!(editor.has_selection());
+        assert_eq!(editor.cursor_position(), 6); // Start of "world"
+        
+        // Clear selection and test document selection
+        editor.clear_selection();
+        editor.set_cursor_position(8);
+        editor.handle_editor_action(&EditorCmdShiftArrowUp {});
+        assert!(editor.has_selection());
+        assert_eq!(editor.cursor_position(), 0); // Start of document
     }
 
     #[test]
@@ -1218,5 +1363,34 @@ mod tests {
         editor.delete_char();
         assert_eq!(editor.content(), "");
         assert_eq!(editor.cursor_position(), 0);
+    }
+
+    #[test]
+    fn test_select_all_action_integration() {
+        let mut editor = new_with_content("Hello world test".to_string());
+        editor.set_cursor_position(8); // In middle
+        
+        // Test EditorSelectAll action
+        editor.handle_editor_action(&EditorSelectAll {});
+        assert!(editor.has_selection());
+        assert_eq!(editor.document_mut().selected_text(), Some("Hello world test".to_string()));
+        assert_eq!(editor.cursor_position(), 16); // At end
+    }
+
+    #[test]
+    fn test_shift_arrow_selection_highlighting_integration() {
+        let mut editor = new_with_content("Hello world".to_string());
+        editor.set_cursor_position(5); // After "Hello"
+        
+        // Test shift+arrow selection creates visual highlighting
+        editor.handle_input_event(InputEvent::ShiftArrowRight);
+        editor.handle_input_event(InputEvent::ShiftArrowRight);
+        
+        assert!(editor.has_selection());
+        assert_eq!(editor.document_mut().selected_text(), Some(" w".to_string()));
+        
+        // Verify selection range for visual highlighting
+        let selection_range = editor.document_mut().selection_range().unwrap();
+        assert_eq!(selection_range, (5, 7));
     }
 }
