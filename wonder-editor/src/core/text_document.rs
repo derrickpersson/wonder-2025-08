@@ -551,6 +551,130 @@ impl Default for TextDocument {
     }
 }
 
+// Implement ActionHandler for TextDocument
+use crate::input::{ActionHandler, EditorAction, Movement, FormatType};
+
+impl ActionHandler for TextDocument {
+    fn handle_action(&mut self, action: EditorAction) -> bool {
+        match action {
+            EditorAction::InsertChar(ch) => {
+                self.insert_char(ch);
+                true
+            }
+            EditorAction::InsertText(text) => {
+                self.insert_text(&text);
+                true
+            }
+            EditorAction::Backspace => {
+                self.backspace()
+            }
+            EditorAction::Delete => {
+                self.delete_char()
+            }
+            EditorAction::MoveCursor(movement) => {
+                self.handle_cursor_movement(movement);
+                true
+            }
+            EditorAction::ExtendSelection(movement) => {
+                self.handle_selection_extension(movement);
+                true
+            }
+            EditorAction::SelectAll => {
+                self.select_all();
+                true
+            }
+            EditorAction::ClearSelection => {
+                self.clear_selection();
+                true
+            }
+            EditorAction::ToggleFormat(format_type) => {
+                match format_type {
+                    FormatType::Bold => {
+                        self.toggle_bold();
+                        true
+                    }
+                    FormatType::Italic => {
+                        self.toggle_italic();
+                        true
+                    }
+                    FormatType::Code => {
+                        // TODO: Implement code formatting
+                        false
+                    }
+                }
+            }
+            EditorAction::MoveToPosition(position) => {
+                self.set_cursor_position(position);
+                true
+            }
+            EditorAction::PageUp => {
+                self.move_page_up();
+                true
+            }
+            EditorAction::PageDown => {
+                self.move_page_down();
+                true
+            }
+        }
+    }
+}
+
+impl TextDocument {
+    /// Handle cursor movement actions
+    fn handle_cursor_movement(&mut self, movement: Movement) {
+        match movement {
+            Movement::Left => self.move_cursor_left(),
+            Movement::Right => self.move_cursor_right(),
+            Movement::Up => self.move_cursor_up(),
+            Movement::Down => self.move_cursor_down(),
+            Movement::WordStart => self.move_to_word_start(),
+            Movement::WordEnd => self.move_to_word_end(),
+            Movement::LineStart => self.move_to_line_start(),
+            Movement::LineEnd => self.move_to_line_end(),
+            Movement::DocumentStart => self.move_to_document_start(),
+            Movement::DocumentEnd => self.move_to_document_end(),
+        }
+    }
+
+    /// Handle selection extension actions
+    fn handle_selection_extension(&mut self, movement: Movement) {
+        match movement {
+            Movement::Left => self.extend_selection_left(),
+            Movement::Right => self.extend_selection_right(),
+            Movement::Up => {
+                // Start selection if not active, then move up
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_cursor_up();
+            }
+            Movement::Down => {
+                // Start selection if not active, then move down
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_cursor_down();
+            }
+            Movement::WordStart => self.extend_selection_to_word_start(),
+            Movement::WordEnd => self.extend_selection_to_word_end(),
+            Movement::LineStart => {
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_to_line_start();
+            }
+            Movement::LineEnd => {
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_to_line_end();
+            }
+            Movement::DocumentStart => self.extend_selection_to_document_start(),
+            Movement::DocumentEnd => self.extend_selection_to_document_end(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
