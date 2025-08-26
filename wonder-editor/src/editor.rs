@@ -599,71 +599,147 @@ impl EditorElement {
     }
 
     fn paint_cursor(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
-        // Get the cursor position from the editor
-        let cursor_position = self.editor.read(cx).cursor_position();
-
-        // Calculate which line the cursor is on and position within that line
+        // Get the cursor position from the editor (original content position)
+        let original_cursor_position = self.editor.read(cx).cursor_position();
         let content = &self.content;
-        let chars_before_cursor: String = content.chars().take(cursor_position).collect();
+        
+        // Map cursor position to transformed content coordinates
+        let transformed_cursor_position = self.hybrid_renderer.map_cursor_position(
+            content, 
+            original_cursor_position, 
+            self.selection.clone()
+        );
 
-        // Count newlines to determine line number
+        // Calculate which line the cursor is on based on ORIGINAL content (for line counting)
+        let chars_before_cursor: String = content.chars().take(original_cursor_position).collect();
         let line_number = chars_before_cursor.matches('\n').count();
 
-        // Find position within the current line
+        // Get the actual line content from original text
+        let current_line_original = content.lines().nth(line_number).unwrap_or("");
+        
+        // Find cursor position within this specific line (original coordinates)
         let lines_before: Vec<&str> = chars_before_cursor.lines().collect();
-        let position_in_line = if chars_before_cursor.ends_with('\n') {
+        let original_position_in_line = if chars_before_cursor.ends_with('\n') {
             0
         } else {
             lines_before
                 .last()
                 .map(|line| line.chars().count())
-                .unwrap_or(cursor_position)
+                .unwrap_or(0)
         };
+
+        // Calculate the selection for this line
+        let line_start_offset = content.lines().take(line_number).map(|l| l.len() + 1).sum::<usize>(); // +1 for newlines
+        let line_cursor_pos = if original_cursor_position >= line_start_offset && original_cursor_position <= line_start_offset + current_line_original.len() {
+            original_cursor_position - line_start_offset
+        } else {
+            usize::MAX
+        };
+        
+        let line_selection = self.selection.as_ref().and_then(|sel| {
+            let line_end = line_start_offset + current_line_original.len();
+            if sel.end > line_start_offset && sel.start <= line_end {
+                let adjusted_start = sel.start.saturating_sub(line_start_offset);
+                let adjusted_end = (sel.end - line_start_offset).min(current_line_original.len());
+                Some(adjusted_start..adjusted_end)
+            } else {
+                None
+            }
+        });
+
+        // Get the transformed content for this line and map cursor position within the line
+        let line_display_text = self.hybrid_renderer.get_display_content(current_line_original, line_cursor_pos, line_selection.clone());
+        let transformed_position_in_line = self.hybrid_renderer.map_cursor_position(current_line_original, original_position_in_line, line_selection.clone());
 
         // Calculate cursor position
         let padding = px(16.0);
         let line_height = px(24.0);
         let font_size = px(16.0);
 
-        // Calculate X position by shaping text on current line up to cursor
-        let cursor_x_offset = if position_in_line == 0 {
+        // Calculate X position by shaping the TRANSFORMED text up to the TRANSFORMED cursor position
+        let cursor_x_offset = if transformed_position_in_line == 0 {
             px(0.0)
         } else {
-            // Get the current line's text up to cursor position
-            let current_line_text = if line_number < content.lines().count() {
-                let line = content.lines().nth(line_number).unwrap_or("");
-                line.chars().take(position_in_line).collect::<String>()
-            } else {
-                String::new()
-            };
+            let text_up_to_cursor = line_display_text.chars().take(transformed_position_in_line).collect::<String>();
 
-            if current_line_text.is_empty() {
+            if text_up_to_cursor.is_empty() {
                 px(0.0)
             } else {
-                let _text_color = rgb(0xcdd6f4);
-                let text_run = TextRun {
-                    len: current_line_text.len(),
-                    font: gpui::Font {
-                        family: "system-ui".into(),
-                        features: gpui::FontFeatures::default(),
-                        weight: gpui::FontWeight::NORMAL,
-                        style: gpui::FontStyle::Normal,
-                        fallbacks: None,
-                    },
-                    color: rgb(0xcdd6f4).into(),
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-
-                let shaped_line = window.text_system().shape_line(
-                    current_line_text.into(),
-                    font_size,
-                    &[text_run],
-                    None,
+                // Generate the actual text runs for this line so we measure correctly
+                let line_runs = self.hybrid_renderer.generate_mixed_text_runs(
+                    current_line_original, 
+                    line_cursor_pos, 
+                    line_selection
                 );
 
-                shaped_line.width
+                if line_runs.is_empty() {
+                    // Fallback to simple measurement
+                    let text_run = TextRun {
+                        len: text_up_to_cursor.len(),
+                        font: gpui::Font {
+                            family: "system-ui".into(),
+                            features: gpui::FontFeatures::default(),
+                            weight: gpui::FontWeight::NORMAL,
+                            style: gpui::FontStyle::Normal,
+                            fallbacks: None,
+                        },
+                        color: rgb(0xcdd6f4).into(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    };
+                    
+                    let shaped_line = window.text_system().shape_line(
+                        text_up_to_cursor.into(),
+                        font_size,
+                        &[text_run],
+                        None,
+                    );
+                    
+                    shaped_line.width
+                } else {
+                    // Create a subset of text runs that covers our cursor position
+                    let mut runs_for_cursor = Vec::new();
+                    let mut run_pos = 0;
+                    
+                    for run in line_runs {
+                        if run_pos >= transformed_position_in_line {
+                            break;
+                        }
+                        
+                        if run_pos + run.len <= transformed_position_in_line {
+                            // Full run is before cursor
+                            let run_len = run.len;
+                            runs_for_cursor.push(run);
+                            run_pos += run_len;
+                        } else {
+                            // Partial run up to cursor
+                            let partial_len = transformed_position_in_line - run_pos;
+                            runs_for_cursor.push(TextRun {
+                                len: partial_len,
+                                font: run.font,
+                                color: run.color,
+                                background_color: run.background_color,
+                                underline: run.underline,
+                                strikethrough: run.strikethrough,
+                            });
+                            break;
+                        }
+                    }
+                    
+                    if !runs_for_cursor.is_empty() {
+                        let shaped_line = window.text_system().shape_line(
+                            text_up_to_cursor.into(),
+                            font_size,
+                            &runs_for_cursor,
+                            None,
+                        );
+                        
+                        shaped_line.width
+                    } else {
+                        px(0.0)
+                    }
+                }
             }
         };
 

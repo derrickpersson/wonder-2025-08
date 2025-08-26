@@ -79,6 +79,111 @@ impl HybridTextRenderer {
         transformed_content
     }
     
+    /// Maps a cursor position from original content to transformed content
+    pub fn map_cursor_position(&self, content: &str, original_cursor_pos: usize, selection: Option<Range<usize>>) -> usize {
+        if content.is_empty() || original_cursor_pos == 0 {
+            return 0;
+        }
+        
+        let token_modes = self.render_document(content, original_cursor_pos, selection);
+        let mut transformed_pos = 0;
+        let mut original_pos = 0;
+        
+        // Sort tokens by start position
+        let mut sorted_tokens: Vec<_> = token_modes.iter().collect();
+        sorted_tokens.sort_by_key(|(token, _)| token.start);
+        
+        for (token, mode) in sorted_tokens {
+            // If cursor is before this token, add the characters between
+            if original_cursor_pos <= token.start {
+                transformed_pos += original_cursor_pos - original_pos;
+                return transformed_pos;
+            }
+            
+            // Add any text before this token
+            if token.start > original_pos {
+                transformed_pos += token.start - original_pos;
+                original_pos = token.start;
+            }
+            
+            // If cursor is inside this token
+            if original_cursor_pos >= token.start && original_cursor_pos <= token.end {
+                match mode {
+                    TokenRenderMode::Raw => {
+                        // In raw mode, position maps directly
+                        transformed_pos += original_cursor_pos - original_pos;
+                        return transformed_pos;
+                    }
+                    TokenRenderMode::Preview => {
+                        // In preview mode, we need to consider the transformed length
+                        match &token.token_type {
+                            MarkdownToken::Bold(inner) | 
+                            MarkdownToken::Italic(inner) | 
+                            MarkdownToken::Code(inner) => {
+                                // For these tokens, cursor at the edge should be at the transformed edge
+                                if original_cursor_pos == token.start {
+                                    return transformed_pos;
+                                } else if original_cursor_pos >= token.end {
+                                    transformed_pos += inner.len();
+                                    return transformed_pos;
+                                } else {
+                                    // Cursor is inside the token - map proportionally
+                                    // For simplicity, put cursor at end of transformed content
+                                    transformed_pos += inner.len();
+                                    return transformed_pos;
+                                }
+                            }
+                            MarkdownToken::Heading(_, content) => {
+                                if original_cursor_pos == token.start {
+                                    return transformed_pos;
+                                } else {
+                                    transformed_pos += content.len();
+                                    return transformed_pos;
+                                }
+                            }
+                            _ => {
+                                // For other tokens, use original length
+                                transformed_pos += original_cursor_pos - original_pos;
+                                return transformed_pos;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Token is completely before cursor, add its transformed length
+            match mode {
+                TokenRenderMode::Raw => {
+                    transformed_pos += token.end - token.start;
+                }
+                TokenRenderMode::Preview => {
+                    match &token.token_type {
+                        MarkdownToken::Bold(inner) | 
+                        MarkdownToken::Italic(inner) | 
+                        MarkdownToken::Code(inner) => {
+                            transformed_pos += inner.len();
+                        }
+                        MarkdownToken::Heading(_, content) => {
+                            transformed_pos += content.len();
+                        }
+                        _ => {
+                            transformed_pos += token.end - token.start;
+                        }
+                    }
+                }
+            }
+            
+            original_pos = token.end;
+        }
+        
+        // Add any remaining characters after the last token
+        if original_cursor_pos > original_pos {
+            transformed_pos += original_cursor_pos - original_pos;
+        }
+        
+        transformed_pos
+    }
+    
     fn build_transformed_content_with_proper_runs(&self, original_content: &str, token_modes: &[(ParsedToken, TokenRenderMode)]) -> (String, Vec<TextRun>) {
         let mut transformed_text = String::new();
         let mut text_runs = Vec::new();
@@ -515,5 +620,57 @@ mod tests {
         // TODO: Re-enable when selection highlighting for transformed content is implemented
         // This test is temporarily modified since selection highlighting was simplified
         // to focus on fixing the core preview rendering issue first
+    }
+
+    #[test]
+    fn test_cursor_position_mapping() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Test with simple bold text: "Hello **world** test"
+        let content = "Hello **world** test";
+        
+        // When cursor is at position 0 (start), should map to 0
+        assert_eq!(renderer.map_cursor_position(content, 0, None), 0);
+        
+        // When cursor is at position 6 (start of "**world**"), should map to position 6 in "Hello world test"
+        assert_eq!(renderer.map_cursor_position(content, 6, None), 6);
+        
+        // When cursor is at position 15 (end of "**world**"), it's actually outside the token
+        // Original: "Hello **world** test" (positions 0-19)
+        // Transformed: "Hello world test" (positions 0-15)  
+        // The cursor at position 15 in original is actually in the space after "world" but before "test"
+        // This maps correctly to position 15 in transformed text (still outside tokens)
+        assert_eq!(renderer.map_cursor_position(content, 15, None), 15);
+        
+        // When cursor is at the very end, should map to the end of transformed text
+        assert_eq!(renderer.map_cursor_position(content, content.len(), None), 16); // "Hello world test".len()
+    }
+
+    #[test]
+    fn test_cursor_mapping_with_raw_mode() {
+        let renderer = HybridTextRenderer::new();
+        let content = "**bold**";
+        
+        // When cursor is inside the token (raw mode), mapping should be more direct
+        let mapped_pos = renderer.map_cursor_position(content, 3, None); // Inside "**bold**"
+        // In raw mode, the token is displayed as-is, so position should map more directly
+        assert!(mapped_pos <= content.len());
+    }
+
+    #[test]
+    fn test_cursor_mapping_complex() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Start **bold** and *italic* end";
+        
+        // Test various cursor positions to ensure correct mapping
+        
+        // Before any tokens
+        assert_eq!(renderer.map_cursor_position(content, 5, None), 5); // "Start"
+        
+        // After all tokens - original has markdown, transformed doesn't
+        // Original: "Start **bold** and *italic* end" (33 chars)
+        // Transformed: "Start bold and italic end" (25 chars)
+        let end_pos = renderer.map_cursor_position(content, content.len(), None);
+        assert_eq!(end_pos, 25); // Length of transformed content
     }
 }
