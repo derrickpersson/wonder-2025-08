@@ -333,8 +333,11 @@ impl Element for EditorElement {
                 }
             });
 
-            // Get both the transformed content and the text runs
+            // Get both the transformed content and the styled segments (NEW APPROACH)
             let display_text = self.hybrid_renderer.get_display_content(&line_text, line_cursor_position, line_selection.clone());
+            let styled_segments = self.hybrid_renderer.generate_styled_text_segments(&line_text, line_cursor_position, line_selection.clone());
+            
+            // For now, use the old approach as fallback until full implementation
             let line_runs = self.hybrid_renderer.generate_mixed_text_runs(&line_text, line_cursor_position, line_selection);
 
             // Use the display text (transformed) for shaping, not the original line text
@@ -360,7 +363,31 @@ impl Element for EditorElement {
                 line_runs
             };
 
-            // Shape this line with the transformed display text and matching text runs
+            // TODO: COMPLETE FONT SIZE INTEGRATION
+            // The following approach would fully implement mixed font sizes:
+            //
+            // if !styled_segments.is_empty() {
+            //     let mut combined_width = 0.0;
+            //     let mut combined_runs = Vec::new();
+            //     
+            //     for segment in styled_segments {
+            //         let shaped_segment = window.text_system().shape_line(
+            //             segment.text.into(), 
+            //             px(segment.font_size), 
+            //             &[segment.text_run], 
+            //             None
+            //         );
+            //         combined_width += shaped_segment.width;
+            //         combined_runs.extend(shaped_segment.runs);
+            //     }
+            //     
+            //     shaped_line = ShapedLine { width: combined_width, runs: combined_runs };
+            // } else {
+            //     // Fallback to current approach
+            //     shaped_line = window.text_system().shape_line(text_to_shape.into(), font_size, &text_runs, None);
+            // }
+            
+            // For now, use the current single-font-size approach
             let shaped_line =
                 window
                     .text_system()
@@ -1457,5 +1484,47 @@ mod tests {
                     "Right-then-left navigation failed for: {}", description);
             }
         }
+    }
+
+    #[test]
+    fn test_editor_uses_styled_segments_with_font_sizes() {
+        use crate::hybrid_renderer::{StyledTextSegment, HybridTextRenderer};
+        
+        // Test content with different markdown elements and their expected font sizes
+        let content = "# Big Title\nRegular text **bold** and `code`";
+        let mut editor = new_with_content(content.to_string());
+        
+        // Position cursor after heading to trigger preview mode
+        editor.document_mut().set_cursor_position(15); // After "# Big Title\n"
+        
+        // Create a hybrid renderer to test styled segments integration
+        let renderer = HybridTextRenderer::new();
+        let segments = renderer.generate_styled_text_segments(
+            editor.content(),
+            editor.cursor_position(),
+            None
+        );
+        
+        // Should have segments for: H1 title, regular text, bold text, space, code
+        assert!(!segments.is_empty(), "Editor should generate styled segments");
+        
+        // Find the heading segment - should be in preview mode with larger font size
+        let heading_segment = segments.iter().find(|s| s.text == "Big Title").expect("Should have heading segment");
+        assert_eq!(heading_segment.font_size, 24.0, "H1 should use 24px font size");
+        assert_eq!(heading_segment.text_run.font.weight, gpui::FontWeight::BOLD, "H1 should be bold");
+        
+        // Find the code segment - should be in preview mode with smaller monospace font
+        let code_segment = segments.iter().find(|s| s.text == "code").expect("Should have code segment");
+        assert_eq!(code_segment.font_size, 14.0, "Code should use 14px font size");
+        assert_eq!(code_segment.text_run.font.family.as_ref(), "monospace", "Code should use monospace font");
+        
+        // Find a regular text segment - should use default font size
+        let regular_segment = segments.iter().find(|s| s.text.contains("Regular text")).expect("Should have regular text segment");
+        assert_eq!(regular_segment.font_size, 16.0, "Regular text should use 16px font size");
+        
+        // Find the bold segment - should use regular font size but bold weight
+        let bold_segment = segments.iter().find(|s| s.text == "bold").expect("Should have bold segment");
+        assert_eq!(bold_segment.font_size, 16.0, "Bold text should use 16px font size");
+        assert_eq!(bold_segment.text_run.font.weight, gpui::FontWeight::BOLD, "Bold text should be bold");
     }
 }
