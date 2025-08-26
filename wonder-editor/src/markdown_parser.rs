@@ -412,6 +412,116 @@ impl Default for MarkdownParser {
     }
 }
 
+// ENG-116: Incremental parsing structures for performance optimization
+#[derive(Debug, Clone)]
+pub struct TextChange {
+    pub start: usize,      // Character position where change starts
+    pub deleted_len: usize, // Number of characters deleted
+    pub inserted_text: String, // New text inserted
+}
+
+#[derive(Debug, Clone)]
+struct CachedBlock {
+    tokens: Vec<ParsedToken>,
+    content_hash: u64,
+    line_start: usize,
+    line_end: usize,
+    char_start: usize,
+    char_end: usize,
+}
+
+pub struct IncrementalParser {
+    base_parser: MarkdownParser,
+    cached_blocks: Vec<CachedBlock>,
+    last_content: String,
+}
+
+impl IncrementalParser {
+    pub fn new() -> Self {
+        Self {
+            base_parser: MarkdownParser::new(),
+            cached_blocks: Vec::new(),
+            last_content: String::new(),
+        }
+    }
+
+    pub fn parse_incremental(&mut self, content: &str, changes: Vec<TextChange>) -> Vec<ParsedToken> {
+        // If no previous content or changes, do full parse
+        if self.last_content.is_empty() || changes.is_empty() {
+            self.last_content = content.to_string();
+            let tokens = self.base_parser.parse_with_positions(content);
+            self.update_cache(&tokens, content);
+            return tokens;
+        }
+
+        // Check if changes are small enough for incremental parsing
+        let total_change_size: usize = changes.iter()
+            .map(|c| c.deleted_len + c.inserted_text.len())
+            .sum();
+
+        // If changes are substantial (>10% of document), just do full reparse
+        if total_change_size > content.len() / 10 {
+            self.last_content = content.to_string();
+            let tokens = self.base_parser.parse_with_positions(content);
+            self.update_cache(&tokens, content);
+            return tokens;
+        }
+
+        // Determine affected regions based on changes
+        let affected_blocks = self.find_affected_blocks(&changes);
+        
+        // If no cached blocks or too many affected, fall back to full parse
+        if self.cached_blocks.is_empty() || affected_blocks.len() > self.cached_blocks.len() / 2 {
+            self.last_content = content.to_string();
+            let tokens = self.base_parser.parse_with_positions(content);
+            self.update_cache(&tokens, content);
+            return tokens;
+        }
+
+        // Perform incremental parsing (simplified for now)
+        self.last_content = content.to_string();
+        let tokens = self.base_parser.parse_with_positions(content);
+        self.update_cache(&tokens, content);
+        tokens
+    }
+
+    fn find_affected_blocks(&self, _changes: &[TextChange]) -> Vec<usize> {
+        // For now, return all blocks as potentially affected
+        // A more sophisticated implementation would analyze change positions
+        (0..self.cached_blocks.len()).collect()
+    }
+
+    fn update_cache(&mut self, tokens: &[ParsedToken], content: &str) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        self.cached_blocks.clear();
+        
+        if tokens.is_empty() {
+            return;
+        }
+
+        // Group tokens into logical blocks (simplified approach)
+        // For now, treat each token as its own block
+        for token in tokens {
+            let block_content = &content[token.start..token.end.min(content.len())];
+            let mut hasher = DefaultHasher::new();
+            block_content.hash(&mut hasher);
+            
+            let cached_block = CachedBlock {
+                tokens: vec![token.clone()],
+                content_hash: hasher.finish(),
+                line_start: token.start,  // Simplified
+                line_end: token.end,      // Simplified  
+                char_start: token.start,
+                char_end: token.end,
+            };
+            
+            self.cached_blocks.push(cached_block);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -706,5 +816,96 @@ mod tests {
         // Test image
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Image(alt, url, title) 
             if alt == "alt" && url == "image.jpg" && title == &Some("title".to_string()))));
+    }
+
+    // TDD RED: Test basic incremental parsing setup
+    #[test]
+    fn test_incremental_parser_creation() {
+        let mut incremental_parser = IncrementalParser::new();
+        let markdown = "# Hello World\n\nSome content here.";
+        
+        // First parse should work normally
+        let tokens = incremental_parser.parse_incremental(markdown, vec![]);
+        assert!(tokens.len() > 0);
+        assert!(tokens.iter().any(|t| matches!(t.token_type, MarkdownToken::Heading(1, ref s) if s == "Hello World")));
+    }
+
+    #[test]
+    fn test_incremental_parser_single_character_edit() {
+        let mut incremental_parser = IncrementalParser::new();
+        let original_markdown = "# Hello World\n\nSome content here.";
+        
+        // Initial parse
+        let initial_tokens = incremental_parser.parse_incremental(original_markdown, vec![]);
+        let initial_count = initial_tokens.len();
+        
+        // Single character edit - add exclamation
+        let modified_markdown = "# Hello World!\n\nSome content here.";
+        let change = TextChange { start: 13, deleted_len: 0, inserted_text: "!".to_string() };
+        
+        let updated_tokens = incremental_parser.parse_incremental(modified_markdown, vec![change]);
+        
+        // Should have same number of tokens but updated heading
+        assert_eq!(updated_tokens.len(), initial_count);
+        assert!(updated_tokens.iter().any(|t| matches!(t.token_type, MarkdownToken::Heading(1, ref s) if s == "Hello World!")));
+    }
+
+    #[test]
+    fn test_incremental_parser_performance() {
+        use std::time::Instant;
+
+        let mut incremental_parser = IncrementalParser::new();
+        
+        // Create a larger document to test performance
+        let mut large_markdown = String::new();
+        for i in 0..100 {
+            large_markdown.push_str(&format!("# Heading {}\n\nParagraph {} with **bold** and *italic* text.\n\n", i, i));
+        }
+        
+        // Initial parse
+        let start = Instant::now();
+        let _initial_tokens = incremental_parser.parse_incremental(&large_markdown, vec![]);
+        let initial_duration = start.elapsed();
+        
+        // Small edit
+        let modified_markdown = large_markdown.replace("Heading 0", "Heading 0 Modified");
+        let change = TextChange { start: 2, deleted_len: 9, inserted_text: "Heading 0 Modified".to_string() };
+        
+        let start = Instant::now();
+        let _updated_tokens = incremental_parser.parse_incremental(&modified_markdown, vec![change]);
+        let incremental_duration = start.elapsed();
+        
+        // Print performance metrics (for manual inspection during testing)
+        println!("Initial parse: {:?}", initial_duration);
+        println!("Incremental parse: {:?}", incremental_duration);
+        
+        // Ensure incremental parsing completes in reasonable time
+        // (This is more about ensuring we don't regress massively than strict performance)
+        assert!(incremental_duration < std::time::Duration::from_millis(100), 
+                "Incremental parsing took too long: {:?}", incremental_duration);
+    }
+
+    #[test]
+    fn test_incremental_parser_large_changes() {
+        let mut incremental_parser = IncrementalParser::new();
+        let original_markdown = "# Small document\n\nWith some content.";
+        
+        // Initial parse
+        let initial_tokens = incremental_parser.parse_incremental(original_markdown, vec![]);
+        
+        // Large change - should fall back to full parse
+        let large_addition = "\n\n# New Section\n\nWith **bold** content.\n\n## Subsection\n\n- List item\n- Another item\n\n`code`";
+        let change = TextChange { 
+            start: original_markdown.len(), 
+            deleted_len: 0, 
+            inserted_text: large_addition.to_string()
+        };
+        
+        let modified_markdown = original_markdown.to_string() + &change.inserted_text;
+        let tokens = incremental_parser.parse_incremental(&modified_markdown, vec![change]);
+        
+        // Should handle large changes gracefully and generate more tokens than initial
+        assert!(tokens.len() > initial_tokens.len(), "Should have more tokens after large addition");
+        assert!(tokens.len() > 5, "Should have multiple tokens from expanded document");
     }
 }
