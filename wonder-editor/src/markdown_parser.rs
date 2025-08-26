@@ -19,6 +19,10 @@ pub enum MarkdownToken {
     ListItem(String),
     BlockQuote(String),
     Text(String),
+    Strikethrough(String),
+    TaskListItem(bool, String), // checked, text
+    HorizontalRule,
+    Image(String, String, Option<String>), // alt, url, title
 }
 
 #[derive(Clone)]
@@ -48,7 +52,14 @@ impl MarkdownParser {
         let mut in_link = false;
         let mut in_list_item = false;
         let mut in_block_quote = false;
+        let mut in_strikethrough = false;
+        let mut in_task_list = false;
+        let mut task_checked = false;
         let mut link_url = String::new();
+        let mut in_image = false;
+        let mut image_alt = String::new();
+        let mut image_url = String::new();
+        let mut image_title: Option<String> = None;
         
         for event in parser {
             match event {
@@ -62,6 +73,9 @@ impl MarkdownParser {
                     Tag::Strong => {
                         in_strong = true;
                     }
+                    Tag::Strikethrough => {
+                        in_strikethrough = true;
+                    }
                     Tag::CodeBlock(_kind) => {
                         // CodeBlockKind can be Indented or Fenced
                         in_code = true;
@@ -70,6 +84,11 @@ impl MarkdownParser {
                     Tag::Link { dest_url, .. } => {
                         in_link = true;
                         link_url = dest_url.to_string();
+                    }
+                    Tag::Image { dest_url, title, .. } => {
+                        in_image = true;
+                        image_url = dest_url.to_string();
+                        image_title = if title.is_empty() { None } else { Some(title.to_string()) };
                     }
                     Tag::Item => {
                         in_list_item = true;
@@ -102,6 +121,13 @@ impl MarkdownParser {
                             in_strong = false;
                         }
                     }
+                    TagEnd::Strikethrough => {
+                        if in_strikethrough {
+                            tokens.push(MarkdownToken::Strikethrough(current_text.clone()));
+                            current_text.clear();
+                            in_strikethrough = false;
+                        }
+                    }
                     TagEnd::CodeBlock => {
                         if in_code {
                             tokens.push(MarkdownToken::CodeBlock(None, current_text.clone()));
@@ -117,9 +143,23 @@ impl MarkdownParser {
                             in_link = false;
                         }
                     }
+                    TagEnd::Image => {
+                        if in_image {
+                            tokens.push(MarkdownToken::Image(current_text.clone(), image_url.clone(), image_title.clone()));
+                            current_text.clear();
+                            image_url.clear();
+                            image_title = None;
+                            in_image = false;
+                        }
+                    }
                     TagEnd::Item => {
                         if in_list_item {
-                            tokens.push(MarkdownToken::ListItem(current_text.clone()));
+                            if in_task_list {
+                                tokens.push(MarkdownToken::TaskListItem(task_checked, current_text.clone()));
+                                in_task_list = false;
+                            } else {
+                                tokens.push(MarkdownToken::ListItem(current_text.clone()));
+                            }
                             current_text.clear();
                             in_list_item = false;
                         }
@@ -135,13 +175,20 @@ impl MarkdownParser {
                 },
                 Event::Text(text) => {
                     current_text.push_str(&text);
-                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_code && !in_link && !in_list_item && !in_block_quote {
+                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote {
                         tokens.push(MarkdownToken::Text(text.to_string()));
                         current_text.clear();
                     }
                 }
                 Event::Code(code) => {
                     tokens.push(MarkdownToken::Code(code.to_string()));
+                }
+                Event::TaskListMarker(checked) => {
+                    in_task_list = true;
+                    task_checked = checked;
+                }
+                Event::Rule => {
+                    tokens.push(MarkdownToken::HorizontalRule);
                 }
                 _ => {}
             }
@@ -161,6 +208,8 @@ impl MarkdownParser {
         let mut strong_start = 0;
         let mut in_emphasis = false;
         let mut emphasis_start = 0;
+        let mut in_strikethrough = false;
+        let mut strikethrough_start = 0;
         let mut in_link = false;
         let mut link_start = 0;
         let mut link_url = String::new();
@@ -185,6 +234,10 @@ impl MarkdownParser {
                 Event::Start(Tag::Emphasis) => {
                     in_emphasis = true;
                     emphasis_start = range.start;
+                }
+                Event::Start(Tag::Strikethrough) => {
+                    in_strikethrough = true;
+                    strikethrough_start = range.start;
                 }
                 Event::Start(Tag::Link { dest_url, .. }) => {
                     in_link = true;
@@ -243,6 +296,17 @@ impl MarkdownParser {
                         in_emphasis = false;
                     }
                 }
+                Event::End(TagEnd::Strikethrough) => {
+                    if in_strikethrough {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Strikethrough(current_text.clone()),
+                            start: strikethrough_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_strikethrough = false;
+                    }
+                }
                 Event::End(TagEnd::Link) => {
                     if in_link {
                         tokens.push(ParsedToken {
@@ -290,7 +354,7 @@ impl MarkdownParser {
                     }
                 }
                 Event::Text(text) => {
-                    if in_heading.is_some() || in_strong || in_emphasis || in_link || in_code_block || in_list_item || in_block_quote {
+                    if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote {
                         current_text.push_str(&text);
                     }
                 }
@@ -570,5 +634,77 @@ mod tests {
         let code_block_markdown = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
         let block_tokens = parser.parse_with_positions(code_block_markdown);
         assert!(block_tokens.iter().any(|t| matches!(t.token_type, MarkdownToken::CodeBlock(Some(ref lang), _) if lang == "rust")));
+    }
+
+    // TDD RED: First failing test for strikethrough
+    #[test]
+    fn test_parse_strikethrough() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse("~~strikethrough text~~");
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Strikethrough(s) if s == "strikethrough text")));
+    }
+
+    #[test] 
+    fn test_parse_strikethrough_with_positions() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse_with_positions("~~strikethrough text~~");
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].token_type, MarkdownToken::Strikethrough(ref s) if s == "strikethrough text"));
+        assert_eq!(tokens[0].start, 0);
+        assert_eq!(tokens[0].end, 22);
+    }
+
+    // TDD RED: Task list tests
+    #[test]
+    fn test_parse_task_lists() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse("- [ ] Unchecked task\n- [x] Checked task");
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TaskListItem(false, s) if s == "Unchecked task")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TaskListItem(true, s) if s == "Checked task")));
+    }
+
+    // TDD RED: Horizontal rule test
+    #[test]
+    fn test_parse_horizontal_rule() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse("---");
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::HorizontalRule)));
+    }
+
+    // TDD RED: Image test
+    #[test]
+    fn test_parse_image() {
+        let parser = MarkdownParser::new();
+        let tokens = parser.parse("![alt text](image.jpg \"title\")");
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Image(alt, url, title) 
+            if alt == "alt text" && url == "image.jpg" && title == &Some("title".to_string()))));
+    }
+
+    // Comprehensive test for all new token types added in ENG-113
+    #[test]
+    fn test_parse_extended_markdown_elements() {
+        let parser = MarkdownParser::new();
+        let markdown = r#"# Heading
+~~strikethrough~~
+- [ ] Unchecked task
+- [x] Checked task
+---
+![alt](image.jpg "title")"#;
+        
+        let tokens = parser.parse(markdown);
+        
+        // Test strikethrough
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Strikethrough(s) if s == "strikethrough")));
+        
+        // Test task lists
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TaskListItem(false, s) if s == "Unchecked task")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TaskListItem(true, s) if s == "Checked task")));
+        
+        // Test horizontal rule
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::HorizontalRule)));
+        
+        // Test image
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Image(alt, url, title) 
+            if alt == "alt" && url == "image.jpg" && title == &Some("title".to_string()))));
     }
 }
