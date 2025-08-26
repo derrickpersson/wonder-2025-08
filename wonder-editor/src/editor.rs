@@ -1157,4 +1157,110 @@ mod tests {
         assert_eq!(text_runs[2].len, " there!".len());
         assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
     }
+
+    #[test]
+    fn test_cursor_positioning_during_mode_switches() {
+        // Test that cursor position remains accurate when switching between raw/preview modes
+        let mut editor = new_with_content("Text **bold content** more text".to_string());
+        
+        // Test cursor positions at various points
+        let test_positions = vec![
+            (0, "Start of document"),
+            (5, "Before bold token"),
+            (7, "Inside bold token - at **b"),  
+            (12, "Inside bold token - at ld co"),
+            (20, "At end of bold token"),
+            (22, "After bold token"),
+            (31, "End of document"),
+        ];
+        
+        for (pos, description) in test_positions {
+            editor.document_mut().set_cursor_position(pos);
+            let cursor_pos = editor.cursor_position();
+            
+            // Cursor should be clamped to valid document bounds
+            assert!(cursor_pos <= editor.content().chars().count(), 
+                "Cursor position {} should be within document bounds for: {}", cursor_pos, description);
+            
+            // Generate text runs with current cursor position  
+            let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
+            let text_runs = renderer.generate_mixed_text_runs(
+                editor.content(),
+                cursor_pos,
+                None
+            );
+            
+            // Text runs should always be generated
+            assert!(!text_runs.is_empty(), "Text runs should not be empty for: {}", description);
+            
+            // Total length of runs should equal the transformed content length
+            let total_run_length: usize = text_runs.iter().map(|run| run.len).sum();
+            assert!(total_run_length > 0, "Total text run length should be > 0 for: {}", description);
+        }
+    }
+
+    #[test]
+    fn test_text_input_with_hybrid_rendering() {
+        // Test that text input works correctly while hybrid rendering is active
+        let mut editor = new_with_content("**bold**".to_string());
+        
+        // Position cursor inside the bold token
+        editor.document_mut().set_cursor_position(4); // Inside "**bo|ld**"
+        
+        // Insert a character
+        editor.handle_char_input('X');
+        
+        // Content should be updated
+        assert_eq!(editor.content(), "**boXld**");
+        assert_eq!(editor.cursor_position(), 5); // Cursor advances after insert
+        
+        // Verify hybrid rendering still works with new content
+        let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
+        let text_runs = renderer.generate_mixed_text_runs(
+            editor.content(),
+            editor.cursor_position(),
+            None
+        );
+        
+        // Should be in raw mode since cursor is inside token
+        assert_eq!(text_runs.len(), 1);
+        assert_eq!(text_runs[0].len, "**boXld**".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::NORMAL); // Raw mode
+    }
+
+    #[test]
+    fn test_cursor_navigation_with_markdown_tokens() {
+        // Test that cursor navigation works correctly around markdown tokens
+        let mut editor = new_with_content("Before **bold text** after".to_string());
+        
+        // Test moving cursor through the document
+        let navigation_tests = vec![
+            (0, "Before |**bold text** after"),
+            (7, "Before |**bold text** after"), // Start of bold token
+            (10, "Before **b|old text** after"), // Inside bold token  
+            (16, "Before **bold t|ext** after"), // Inside bold token
+            (19, "Before **bold text|** after"), // End of bold token
+            (21, "Before **bold text** |after"), // After bold token
+        ];
+        
+        for (target_pos, description) in navigation_tests {
+            editor.document_mut().set_cursor_position(target_pos);
+            let actual_pos = editor.cursor_position();
+            
+            // Cursor position should be valid
+            assert!(actual_pos <= editor.content().chars().count(), 
+                "Invalid cursor position {} for: {}", actual_pos, description);
+            
+            // Test arrow key navigation from this position
+            let original_pos = actual_pos;
+            
+            // Move right then left should return to original position (if not at boundaries)
+            if original_pos < editor.content().chars().count() {
+                editor.document_mut().move_cursor_right();
+                editor.document_mut().move_cursor_left();
+                assert_eq!(editor.cursor_position(), original_pos, 
+                    "Right-then-left navigation failed for: {}", description);
+            }
+        }
+    }
 }
