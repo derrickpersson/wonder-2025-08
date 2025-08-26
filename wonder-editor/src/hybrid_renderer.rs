@@ -12,6 +12,7 @@ pub enum TokenRenderMode {
     Preview,
 }
 
+#[derive(Clone)]
 pub struct HybridTextRenderer {
     parser: MarkdownParser,
 }

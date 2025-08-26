@@ -749,7 +749,7 @@ impl Render for MarkdownEditor {
             .child(
                 // Main content area with hybrid editor
                 div().flex_1().w_full().p_4().child(
-                    // Use EditorElement with hybrid rendering capabilities
+                    // Use EditorElement with hybrid rendering capabilities - USE THE EDITOR'S RENDERER
                     EditorElement {
                         editor: cx.entity().clone(),
                         content,
@@ -757,7 +757,7 @@ impl Render for MarkdownEditor {
                         focus_handle: self.focus_handle.clone(),
                         cursor_position,
                         selection,
-                        hybrid_renderer: HybridTextRenderer::new(),
+                        hybrid_renderer: self.hybrid_renderer.clone(),
                     },
                 ),
             )
@@ -1093,5 +1093,68 @@ mod tests {
         editor.handle_char_input('i');
         assert_eq!(editor.content(), "Hi");
         assert_eq!(editor.cursor_position(), 2);
+    }
+
+    #[test]
+    fn test_hybrid_renderer_integration() {
+        // Test that the editor's hybrid renderer is being used, not creating new instances
+        let mut editor = new_with_content("Hi **bold text** there!".to_string());
+        
+        // With cursor outside bold token (at the end), should render as formatted (preview mode)
+        editor.document_mut().set_cursor_position(22); // After "there!" - outside the bold token
+        
+        // The editor should use its own hybrid renderer, which should produce proper text runs
+        let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
+        let text_runs = renderer.generate_mixed_text_runs(
+            editor.content(), 
+            editor.cursor_position(), 
+            None
+        );
+        
+        // Should have 3 text runs: "Hi ", "bold text" (formatted), " there!"
+        assert_eq!(text_runs.len(), 3);
+        
+        // First run: "Hi "
+        assert_eq!(text_runs[0].len, "Hi ".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Second run: "bold text" (no asterisks, formatted)
+        assert_eq!(text_runs[1].len, "bold text".len());
+        assert_eq!(text_runs[1].font.weight, gpui::FontWeight::BOLD);
+        
+        // Third run: " there!"
+        assert_eq!(text_runs[2].len, " there!".len());
+        assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
+    }
+
+    #[test] 
+    fn test_hybrid_renderer_integration_raw_mode() {
+        // Test that when cursor is inside token, it renders in raw mode
+        let mut editor = new_with_content("Hi **bold text** there!".to_string());
+        
+        // With cursor inside bold token, should render as raw
+        editor.document_mut().set_cursor_position(6); // Inside the bold token: "Hi **b|old text**"
+        
+        let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
+        let text_runs = renderer.generate_mixed_text_runs(
+            editor.content(), 
+            editor.cursor_position(), 
+            None
+        );
+        
+        // Should have 3 runs: "Hi ", "**bold text**" (raw), " there!"
+        assert_eq!(text_runs.len(), 3);
+        
+        // First run: "Hi "
+        assert_eq!(text_runs[0].len, "Hi ".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Second run: "**bold text**" (raw with asterisks)
+        assert_eq!(text_runs[1].len, "**bold text**".len());
+        assert_eq!(text_runs[1].font.weight, gpui::FontWeight::NORMAL);
+        
+        // Third run: " there!"
+        assert_eq!(text_runs[2].len, " there!".len());
+        assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
     }
 }
