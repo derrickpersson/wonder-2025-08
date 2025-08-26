@@ -101,25 +101,33 @@ impl HybridTextRenderer {
             }
             
             // Handle the token based on its mode
-            let (display_text, font_weight, font_style, color) = match mode {
+            let (display_text, font_weight, font_style, color, font_family) = match mode {
                 TokenRenderMode::Raw => {
                     // Raw mode: show original markdown syntax
                     let original_text = &original_content[token.start..token.end];
-                    (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x94a3b8))
+                    (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x94a3b8), "system-ui")
                 }
                 TokenRenderMode::Preview => {
                     // Preview mode: show formatted content
                     match &token.token_type {
                         MarkdownToken::Bold(inner_content) => {
-                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4))
+                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "system-ui")
                         }
                         MarkdownToken::Italic(inner_content) => {
-                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, rgb(0xcdd6f4))
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, rgb(0xcdd6f4), "system-ui")
+                        }
+                        MarkdownToken::Heading(level, content) => {
+                            // Heading preview: show content without # symbols, bold and potentially larger
+                            (content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "system-ui")
+                        }
+                        MarkdownToken::Code(inner_content) => {
+                            // Code preview: show content without backticks, monospace font
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xa6da95), "monospace")
                         }
                         _ => {
                             // For other tokens, show original text
                             let original_text = &original_content[token.start..token.end];
-                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4))
+                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "system-ui")
                         }
                     }
                 }
@@ -131,7 +139,7 @@ impl HybridTextRenderer {
             text_runs.push(TextRun {
                 len: display_text.len(),
                 font: Font {
-                    family: "system-ui".into(),
+                    family: font_family.into(),
                     features: FontFeatures::default(),
                     weight: font_weight,
                     style: font_style,
@@ -450,6 +458,96 @@ mod tests {
         // Third run: " test"
         assert_eq!(text_runs[2].len, " test".len());
         assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
+    }
+
+    #[test]
+    fn test_heading_preview_rendering() {
+        let renderer = HybridTextRenderer::new();
+        let content = "# Main Title";
+        
+        // With cursor outside heading token, should render as formatted (preview mode)
+        let text_runs = renderer.generate_mixed_text_runs(content, 100, None);
+        
+        // Should have one run with "Main Title" (no # symbol), bold weight, and larger size
+        assert_eq!(text_runs.len(), 1);
+        assert_eq!(text_runs[0].len, "Main Title".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::BOLD);
+        
+        // Test H1 with cursor inside (raw mode)
+        let text_runs = renderer.generate_mixed_text_runs(content, 1, None);
+        assert_eq!(text_runs.len(), 1);
+        assert_eq!(text_runs[0].len, "# Main Title".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::NORMAL); // Raw mode
+    }
+    
+    #[test]
+    fn test_multiple_heading_levels() {
+        let renderer = HybridTextRenderer::new();
+        
+        let test_cases = vec![
+            ("# H1 Title", "H1 Title"),
+            ("## H2 Title", "H2 Title"),  
+            ("### H3 Title", "H3 Title"),
+            ("#### H4 Title", "H4 Title"),
+            ("##### H5 Title", "H5 Title"),
+            ("###### H6 Title", "H6 Title"),
+        ];
+        
+        for (content, expected_text) in test_cases {
+            let text_runs = renderer.generate_mixed_text_runs(content, 100, None);
+            
+            assert_eq!(text_runs.len(), 1);
+            assert_eq!(text_runs[0].len, expected_text.len());
+            assert_eq!(text_runs[0].font.weight, gpui::FontWeight::BOLD, 
+                "Heading should be bold for: {}", content);
+        }
+    }
+    
+    #[test] 
+    fn test_code_preview_rendering() {
+        let renderer = HybridTextRenderer::new();
+        let content = "`inline code`";
+        
+        // With cursor outside code token, should render as formatted (preview mode)
+        let text_runs = renderer.generate_mixed_text_runs(content, 100, None);
+        
+        // Should have one run with "inline code" (no backticks) and monospace font
+        assert_eq!(text_runs.len(), 1);
+        assert_eq!(text_runs[0].len, "inline code".len());
+        assert_eq!(text_runs[0].font.family.as_ref(), "monospace");
+        
+        // Test with cursor inside (raw mode)
+        let text_runs = renderer.generate_mixed_text_runs(content, 5, None);
+        assert_eq!(text_runs.len(), 1);
+        assert_eq!(text_runs[0].len, "`inline code`".len());
+        assert_eq!(text_runs[0].font.family.as_ref(), "system-ui"); // Raw mode uses default font
+    }
+    
+    #[test]
+    fn test_mixed_content_with_headings_and_formatting() {
+        let renderer = HybridTextRenderer::new();
+        let content = "**Bold text** and `code block`";
+        
+        // With cursor outside all tokens, should render both in preview mode
+        let text_runs = renderer.generate_mixed_text_runs(content, 100, None);
+        
+        // Should have 3 runs: "Bold text" (bold), " and " (normal), "code block" (monospace)
+        assert_eq!(text_runs.len(), 3);
+        
+        // First run: "Bold text" without ** and bold weight
+        assert_eq!(text_runs[0].len, "Bold text".len());
+        assert_eq!(text_runs[0].font.weight, gpui::FontWeight::BOLD);
+        assert_eq!(text_runs[0].font.family.as_ref(), "system-ui");
+        
+        // Second run: " and " (normal text between tokens)
+        assert_eq!(text_runs[1].len, " and ".len());
+        assert_eq!(text_runs[1].font.weight, gpui::FontWeight::NORMAL);
+        assert_eq!(text_runs[1].font.family.as_ref(), "system-ui");
+        
+        // Third run: "code block" without backticks and monospace font
+        assert_eq!(text_runs[2].len, "code block".len());
+        assert_eq!(text_runs[2].font.weight, gpui::FontWeight::NORMAL);
+        assert_eq!(text_runs[2].font.family.as_ref(), "monospace");
     }
 
     #[test]
