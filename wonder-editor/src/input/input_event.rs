@@ -24,6 +24,14 @@ pub enum InputEvent {
     Enter,
     Tab,
     CmdA,
+    CmdC,
+    CmdX,
+    CmdV,
+    CmdShiftV,
+    CtrlC,
+    CtrlX,
+    CtrlV,
+    CtrlShiftV,
 }
 
 impl InputEvent {
@@ -57,6 +65,14 @@ pub enum SpecialKey {
     Enter,
     Tab,
     CmdA,
+    CmdC,
+    CmdX,
+    CmdV,
+    CmdShiftV,
+    CtrlC,
+    CtrlX,
+    CtrlV,
+    CtrlShiftV,
 }
 
 impl From<SpecialKey> for InputEvent {
@@ -85,6 +101,14 @@ impl From<SpecialKey> for InputEvent {
             SpecialKey::Enter => InputEvent::Enter,
             SpecialKey::Tab => InputEvent::Tab,
             SpecialKey::CmdA => InputEvent::CmdA,
+            SpecialKey::CmdC => InputEvent::CmdC,
+            SpecialKey::CmdX => InputEvent::CmdX,
+            SpecialKey::CmdV => InputEvent::CmdV,
+            SpecialKey::CmdShiftV => InputEvent::CmdShiftV,
+            SpecialKey::CtrlC => InputEvent::CtrlC,
+            SpecialKey::CtrlX => InputEvent::CtrlX,
+            SpecialKey::CtrlV => InputEvent::CtrlV,
+            SpecialKey::CtrlShiftV => InputEvent::CtrlShiftV,
         }
     }
 }

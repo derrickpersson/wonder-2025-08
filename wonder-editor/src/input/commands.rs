@@ -29,6 +29,10 @@ pub enum EditorCommand {
     ExtendSelectionToDocumentEnd,
     ToggleBold,
     ToggleItalic,
+    Copy,
+    Cut,
+    Paste,
+    PasteWithoutFormatting,
 }
 
 pub trait CommandExecutor {
@@ -138,6 +142,22 @@ impl CommandExecutor for TextDocument {
             }
             EditorCommand::ToggleItalic => {
                 self.toggle_italic();
+                true
+            }
+            EditorCommand::Copy => {
+                self.copy();
+                true
+            }
+            EditorCommand::Cut => {
+                self.cut();
+                true
+            }
+            EditorCommand::Paste => {
+                self.paste();
+                true
+            }
+            EditorCommand::PasteWithoutFormatting => {
+                self.paste(); // For now, same as regular paste
                 true
             }
         }
@@ -320,5 +340,132 @@ mod tests {
         assert!(result);
         assert_eq!(doc.cursor_position(), 5);
         assert!(!doc.has_selection()); // Selection should be cleared when cursor returns to anchor
+    }
+
+    #[test]
+    fn test_copy_with_selection() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(0);
+        doc.start_selection();
+        doc.set_cursor_position(5); // Select "Hello"
+        
+        let result = doc.execute(EditorCommand::Copy);
+        assert!(result);
+        
+        // Content should remain unchanged
+        assert_eq!(doc.content(), "Hello world");
+        // Selection should remain
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("Hello".to_string()));
+        // Should have copied to clipboard (verified by checking clipboard state)
+        assert_eq!(doc.get_clipboard_content(), Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn test_copy_without_selection_copies_current_line() {
+        let mut doc = TextDocument::with_content("Line 1\nLine 2\nLine 3".to_string());
+        doc.set_cursor_position(9); // In "Line 2"
+        
+        let result = doc.execute(EditorCommand::Copy);
+        assert!(result);
+        
+        // Content should remain unchanged
+        assert_eq!(doc.content(), "Line 1\nLine 2\nLine 3");
+        // No selection should exist
+        assert!(!doc.has_selection());
+        // Should have copied current line to clipboard
+        assert_eq!(doc.get_clipboard_content(), Some("Line 2\n".to_string()));
+    }
+
+    #[test]
+    fn test_cut_with_selection() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(0);
+        doc.start_selection();
+        doc.set_cursor_position(5); // Select "Hello"
+        
+        let result = doc.execute(EditorCommand::Cut);
+        assert!(result);
+        
+        // Selected text should be removed
+        assert_eq!(doc.content(), " world");
+        // No selection should remain
+        assert!(!doc.has_selection());
+        // Cursor should be at start of remaining text
+        assert_eq!(doc.cursor_position(), 0);
+        // Should have copied to clipboard
+        assert_eq!(doc.get_clipboard_content(), Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn test_cut_without_selection_cuts_current_line() {
+        let mut doc = TextDocument::with_content("Line 1\nLine 2\nLine 3".to_string());
+        doc.set_cursor_position(9); // In "Line 2"
+        
+        let result = doc.execute(EditorCommand::Cut);
+        assert!(result);
+        
+        // Current line should be removed
+        assert_eq!(doc.content(), "Line 1\nLine 3");
+        // No selection should exist
+        assert!(!doc.has_selection());
+        // Cursor should be at start of next line
+        assert_eq!(doc.cursor_position(), 7); // Start of "Line 3"
+        // Should have copied current line to clipboard
+        assert_eq!(doc.get_clipboard_content(), Some("Line 2\n".to_string()));
+    }
+
+    #[test]
+    fn test_paste_with_clipboard_content() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(5); // After "Hello"
+        
+        // Set up clipboard content
+        doc.copy_text_to_clipboard(" amazing".to_string());
+        
+        let result = doc.execute(EditorCommand::Paste);
+        assert!(result);
+        
+        // Text should be inserted at cursor position
+        assert_eq!(doc.content(), "Hello amazing world");
+        // Cursor should be after pasted text
+        assert_eq!(doc.cursor_position(), 13); // After " amazing"
+    }
+
+    #[test]
+    fn test_paste_replaces_selection() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(6); // Start of "world"
+        doc.start_selection();
+        doc.set_cursor_position(11); // Select "world"
+        
+        // Set up clipboard content
+        doc.copy_text_to_clipboard("universe".to_string());
+        
+        let result = doc.execute(EditorCommand::Paste);
+        assert!(result);
+        
+        // Selected text should be replaced with pasted content
+        assert_eq!(doc.content(), "Hello universe");
+        // No selection should remain
+        assert!(!doc.has_selection());
+        // Cursor should be after pasted text
+        assert_eq!(doc.cursor_position(), 14); // After "universe"
+    }
+
+    #[test]
+    fn test_paste_without_clipboard_content() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(5);
+        
+        // No clipboard content
+        assert_eq!(doc.get_clipboard_content(), None);
+        
+        let result = doc.execute(EditorCommand::Paste);
+        assert!(result);
+        
+        // Content should remain unchanged when clipboard is empty
+        assert_eq!(doc.content(), "Hello world");
+        assert_eq!(doc.cursor_position(), 5);
     }
 }

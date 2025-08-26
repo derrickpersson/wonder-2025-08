@@ -51,6 +51,14 @@ impl KeyboardHandler {
             InputEvent::Enter => EditorCommand::InsertChar('\n'),
             InputEvent::Tab => EditorCommand::InsertChar('\t'),
             InputEvent::CmdA => EditorCommand::SelectAll,
+            InputEvent::CmdC => EditorCommand::Copy,
+            InputEvent::CmdX => EditorCommand::Cut,
+            InputEvent::CmdV => EditorCommand::Paste,
+            InputEvent::CmdShiftV => EditorCommand::PasteWithoutFormatting,
+            InputEvent::CtrlC => EditorCommand::Copy,
+            InputEvent::CtrlX => EditorCommand::Cut,
+            InputEvent::CtrlV => EditorCommand::Paste,
+            InputEvent::CtrlShiftV => EditorCommand::PasteWithoutFormatting,
         }
     }
 }
@@ -246,5 +254,38 @@ mod tests {
         assert!(doc.has_selection());
         assert_eq!(doc.selected_text(), Some("Hello world test".to_string()));
         assert_eq!(doc.cursor_position(), 16); // At end
+    }
+
+    #[test]
+    fn test_keyboard_handler_clipboard_operations() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        
+        // Test copy with selection
+        doc.set_cursor_position(0);
+        doc.start_selection();
+        doc.set_cursor_position(5); // Select "Hello"
+        
+        let result = handler.handle_input_event(InputEvent::CmdC, &mut doc);
+        assert!(result);
+        assert_eq!(doc.get_clipboard_content(), Some("Hello".to_string()));
+        
+        // Clear selection and move to end
+        doc.clear_selection();
+        doc.set_cursor_position(11); // At end
+        let result = handler.handle_input_event(InputEvent::CmdV, &mut doc);
+        assert!(result);
+        assert_eq!(doc.content(), "Hello worldHello");
+        assert_eq!(doc.cursor_position(), 16); // After pasted text
+        
+        // Test cut
+        doc.set_cursor_position(6);
+        doc.start_selection();
+        doc.set_cursor_position(11); // Select "world"
+        
+        let result = handler.handle_input_event(InputEvent::CmdX, &mut doc);
+        assert!(result);
+        assert_eq!(doc.content(), "Hello Hello");
+        assert_eq!(doc.get_clipboard_content(), Some("world".to_string()));
     }
 }

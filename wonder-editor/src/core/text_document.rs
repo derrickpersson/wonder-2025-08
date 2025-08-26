@@ -5,6 +5,7 @@ pub struct TextDocument {
     content: String,
     cursor: Cursor,
     selection: Selection,
+    clipboard: Option<String>,
 }
 
 impl TextDocument {
@@ -13,6 +14,7 @@ impl TextDocument {
             content: String::new(),
             cursor: Cursor::new(),
             selection: Selection::new(),
+            clipboard: None,
         }
     }
 
@@ -23,6 +25,7 @@ impl TextDocument {
             content,
             cursor,
             selection: Selection::new(),
+            clipboard: None,
         }
     }
 
@@ -672,6 +675,110 @@ impl TextDocument {
             Movement::DocumentStart => self.extend_selection_to_document_start(),
             Movement::DocumentEnd => self.extend_selection_to_document_end(),
         }
+    }
+
+    // Clipboard operations
+    pub fn copy(&mut self) {
+        if self.has_selection() {
+            // Copy selected text
+            if let Some(text) = self.selected_text() {
+                self.clipboard = Some(text);
+            }
+        } else {
+            // Copy current line
+            let line_text = self.get_current_line_with_newline();
+            self.clipboard = Some(line_text);
+        }
+    }
+
+    pub fn cut(&mut self) {
+        if self.has_selection() {
+            // Cut selected text
+            if let Some(text) = self.selected_text() {
+                self.clipboard = Some(text);
+                self.delete_selection();
+            }
+        } else {
+            // Cut current line
+            let line_text = self.get_current_line_with_newline();
+            self.clipboard = Some(line_text);
+            self.delete_current_line();
+        }
+    }
+
+    pub fn get_clipboard_content(&self) -> Option<String> {
+        self.clipboard.clone()
+    }
+
+    pub fn copy_text_to_clipboard(&mut self, text: String) {
+        self.clipboard = Some(text);
+    }
+
+    pub fn paste(&mut self) {
+        if let Some(content) = self.clipboard.clone() {
+            if self.has_selection() {
+                // Replace selection with pasted content
+                self.delete_selection();
+            }
+            self.insert_text(&content);
+        }
+    }
+
+    fn get_current_line_with_newline(&self) -> String {
+        let cursor_pos = self.cursor_position();
+        let content_chars: Vec<char> = self.content.chars().collect();
+        
+        // Find line start
+        let mut line_start = cursor_pos;
+        while line_start > 0 && content_chars.get(line_start - 1) != Some(&'\n') {
+            line_start -= 1;
+        }
+        
+        // Find line end (including newline)
+        let mut line_end = cursor_pos;
+        while line_end < content_chars.len() && content_chars.get(line_end) != Some(&'\n') {
+            line_end += 1;
+        }
+        if line_end < content_chars.len() {
+            line_end += 1; // Include the newline
+        }
+        
+        content_chars[line_start..line_end].iter().collect()
+    }
+
+    fn delete_current_line(&mut self) {
+        let cursor_pos = self.cursor_position();
+        let content_chars: Vec<char> = self.content.chars().collect();
+        
+        // Find line start
+        let mut line_start = cursor_pos;
+        while line_start > 0 && content_chars.get(line_start - 1) != Some(&'\n') {
+            line_start -= 1;
+        }
+        
+        // Find line end (including newline)
+        let mut line_end = cursor_pos;
+        while line_end < content_chars.len() && content_chars.get(line_end) != Some(&'\n') {
+            line_end += 1;
+        }
+        if line_end < content_chars.len() {
+            line_end += 1; // Include the newline
+        }
+        
+        // Remove the line
+        let new_content: String = content_chars[..line_start]
+            .iter()
+            .chain(content_chars[line_end..].iter())
+            .collect();
+        
+        self.content = new_content;
+        // Set cursor to start of next line (or end if this was last line)
+        let new_cursor_pos = if line_start < self.content.chars().count() {
+            line_start
+        } else {
+            self.content.chars().count()
+        };
+        self.set_cursor_position(new_cursor_pos);
     }
 }
 
