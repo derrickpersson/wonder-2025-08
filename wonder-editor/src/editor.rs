@@ -512,6 +512,7 @@ impl EditorElement {
         let content = &self.content;
         let mut char_offset = 0;
         let mut y_offset = padding;
+        let font_size = px(16.0);
 
         // Process each line with its corresponding shaped line
         let lines: Vec<&str> = content.lines().collect();
@@ -521,74 +522,187 @@ impl EditorElement {
             
             // Check if this line intersects with the selection
             if selection_range.end > line_start && selection_range.start <= line_end {
-                // Calculate the selection bounds within this line
+                // Calculate the selection bounds within this line (original coordinates)
                 let sel_start_in_line = selection_range.start.saturating_sub(line_start);
                 let sel_end_in_line = (selection_range.end.min(line_end) - line_start).min(line_text.len());
                 
                 if sel_start_in_line < sel_end_in_line && line_index < shaped_lines.len() {
-                    // Measure text accurately using GPUI's text shaping
-                    let font_size = px(16.0);
-                    let text_run = TextRun {
-                        len: line_text.len(),
-                        font: gpui::Font {
-                            family: "system-ui".into(),
-                            features: gpui::FontFeatures::default(),
-                            weight: gpui::FontWeight::NORMAL,
-                            style: gpui::FontStyle::Normal,
-                            fallbacks: None,
-                        },
-                        color: rgb(0xcdd6f4).into(),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
+                    // Calculate cursor position for this line
+                    let line_cursor_pos = if self.cursor_position >= line_start && self.cursor_position <= line_end {
+                        self.cursor_position - line_start
+                    } else {
+                        usize::MAX
                     };
-                    
-                    // Measure from start of line to selection start
-                    let x_start = if sel_start_in_line == 0 {
+
+                    // Calculate line selection
+                    let line_selection = Some(sel_start_in_line..sel_end_in_line);
+
+                    // Get the transformed content and text runs for this line
+                    let line_display_text = self.hybrid_renderer.get_display_content(line_text, line_cursor_pos, line_selection.clone());
+                    let line_runs = self.hybrid_renderer.generate_mixed_text_runs(line_text, line_cursor_pos, line_selection.clone());
+
+                    // Map selection positions from original to transformed coordinates
+                    let transformed_start = self.hybrid_renderer.map_cursor_position(line_text, sel_start_in_line, line_selection.clone());
+                    let transformed_end = self.hybrid_renderer.map_cursor_position(line_text, sel_end_in_line, line_selection.clone());
+
+                    // Calculate x positions using transformed content
+                    let x_start = if transformed_start == 0 {
                         padding
                     } else {
-                        let text_to_sel_start = line_text.chars().take(sel_start_in_line).collect::<String>();
+                        let text_to_sel_start = line_display_text.chars().take(transformed_start).collect::<String>();
                         if !text_to_sel_start.is_empty() {
-                            let shaped = window.text_system().shape_line(
-                                text_to_sel_start.into(),
-                                font_size,
-                                &[text_run.clone()],
-                                None,
-                            );
-                            padding + shaped.width
+                            if line_runs.is_empty() {
+                                // Fallback to simple measurement
+                                let text_run = TextRun {
+                                    len: text_to_sel_start.len(),
+                                    font: gpui::Font {
+                                        family: "system-ui".into(),
+                                        features: gpui::FontFeatures::default(),
+                                        weight: gpui::FontWeight::NORMAL,
+                                        style: gpui::FontStyle::Normal,
+                                        fallbacks: None,
+                                    },
+                                    color: rgb(0xcdd6f4).into(),
+                                    background_color: None,
+                                    underline: None,
+                                    strikethrough: None,
+                                };
+                                let shaped = window.text_system().shape_line(
+                                    text_to_sel_start.into(),
+                                    font_size,
+                                    &[text_run],
+                                    None,
+                                );
+                                padding + shaped.width
+                            } else {
+                                // Use the proper text runs for accurate measurement
+                                let mut runs_for_start = Vec::new();
+                                let mut run_pos = 0;
+                                
+                                for run in &line_runs {
+                                    if run_pos >= transformed_start {
+                                        break;
+                                    }
+                                    
+                                    if run_pos + run.len <= transformed_start {
+                                        runs_for_start.push(run.clone());
+                                        run_pos += run.len;
+                                    } else {
+                                        let partial_len = transformed_start - run_pos;
+                                        runs_for_start.push(TextRun {
+                                            len: partial_len,
+                                            font: run.font.clone(),
+                                            color: run.color,
+                                            background_color: run.background_color,
+                                            underline: run.underline.clone(),
+                                            strikethrough: run.strikethrough.clone(),
+                                        });
+                                        break;
+                                    }
+                                }
+                                
+                                if !runs_for_start.is_empty() {
+                                    let shaped = window.text_system().shape_line(
+                                        text_to_sel_start.into(),
+                                        font_size,
+                                        &runs_for_start,
+                                        None,
+                                    );
+                                    padding + shaped.width
+                                } else {
+                                    padding
+                                }
+                            }
                         } else {
                             padding
                         }
                     };
                     
-                    // Measure from start of line to selection end
+                    // Calculate x_end using transformed content
                     let x_end = {
-                        let text_to_sel_end = line_text.chars().take(sel_end_in_line).collect::<String>();
+                        let text_to_sel_end = line_display_text.chars().take(transformed_end).collect::<String>();
                         if !text_to_sel_end.is_empty() {
-                            let shaped = window.text_system().shape_line(
-                                text_to_sel_end.into(),
-                                font_size,
-                                &[text_run.clone()],
-                                None,
-                            );
-                            padding + shaped.width
+                            if line_runs.is_empty() {
+                                // Fallback to simple measurement
+                                let text_run = TextRun {
+                                    len: text_to_sel_end.len(),
+                                    font: gpui::Font {
+                                        family: "system-ui".into(),
+                                        features: gpui::FontFeatures::default(),
+                                        weight: gpui::FontWeight::NORMAL,
+                                        style: gpui::FontStyle::Normal,
+                                        fallbacks: None,
+                                    },
+                                    color: rgb(0xcdd6f4).into(),
+                                    background_color: None,
+                                    underline: None,
+                                    strikethrough: None,
+                                };
+                                let shaped = window.text_system().shape_line(
+                                    text_to_sel_end.into(),
+                                    font_size,
+                                    &[text_run],
+                                    None,
+                                );
+                                padding + shaped.width
+                            } else {
+                                // Use the proper text runs for accurate measurement
+                                let mut runs_for_end = Vec::new();
+                                let mut run_pos = 0;
+                                
+                                for run in &line_runs {
+                                    if run_pos >= transformed_end {
+                                        break;
+                                    }
+                                    
+                                    if run_pos + run.len <= transformed_end {
+                                        runs_for_end.push(run.clone());
+                                        run_pos += run.len;
+                                    } else {
+                                        let partial_len = transformed_end - run_pos;
+                                        runs_for_end.push(TextRun {
+                                            len: partial_len,
+                                            font: run.font.clone(),
+                                            color: run.color,
+                                            background_color: run.background_color,
+                                            underline: run.underline.clone(),
+                                            strikethrough: run.strikethrough.clone(),
+                                        });
+                                        break;
+                                    }
+                                }
+                                
+                                if !runs_for_end.is_empty() {
+                                    let shaped = window.text_system().shape_line(
+                                        text_to_sel_end.into(),
+                                        font_size,
+                                        &runs_for_end,
+                                        None,
+                                    );
+                                    padding + shaped.width
+                                } else {
+                                    padding
+                                }
+                            }
                         } else {
                             padding
                         }
                     };
                     
                     // Paint selection rectangle for this line
-                    window.paint_quad(gpui::PaintQuad {
-                        bounds: Bounds {
-                            origin: bounds.origin + gpui::point(x_start, y_offset),
-                            size: size(x_end - x_start, line_height),
-                        },
-                        background: selection_color.into(),
-                        border_widths: gpui::Edges::all(px(0.0)),
-                        border_color: transparent_black().into(),
-                        border_style: gpui::BorderStyle::Solid,
-                        corner_radii: gpui::Corners::all(px(0.0)),
-                    });
+                    if x_end > x_start {
+                        window.paint_quad(gpui::PaintQuad {
+                            bounds: Bounds {
+                                origin: bounds.origin + gpui::point(x_start, y_offset),
+                                size: size(x_end - x_start, line_height),
+                            },
+                            background: selection_color.into(),
+                            border_widths: gpui::Edges::all(px(0.0)),
+                            border_color: transparent_black().into(),
+                            border_style: gpui::BorderStyle::Solid,
+                            corner_radii: gpui::Corners::all(px(0.0)),
+                        });
+                    }
                 }
             }
             
