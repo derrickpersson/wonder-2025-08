@@ -311,34 +311,39 @@ impl Element for EditorElement {
                 line.to_string()
             };
 
-            // Generate hybrid text runs for this specific line
-            let line_runs = self.hybrid_renderer.generate_mixed_text_runs(
-                &line_text,
-                if self.cursor_position >= current_offset
-                    && self.cursor_position <= current_offset + line.len()
-                {
-                    self.cursor_position - current_offset
-                } else {
-                    usize::MAX // Cursor not in this line
-                },
-                self.selection.as_ref().and_then(|sel| {
-                    // Adjust selection range to line-relative coordinates
-                    let line_start = current_offset;
-                    let line_end = current_offset + line.len();
-                    if sel.end > line_start && sel.start < line_end {
-                        let adjusted_start = sel.start.saturating_sub(line_start);
-                        let adjusted_end = (sel.end - line_start).min(line.len());
-                        Some(adjusted_start..adjusted_end)
-                    } else {
-                        None
-                    }
-                }),
-            );
+            // Calculate cursor position for this line
+            let line_cursor_position = if self.cursor_position >= current_offset
+                && self.cursor_position <= current_offset + line.len()
+            {
+                self.cursor_position - current_offset
+            } else {
+                usize::MAX // Cursor not in this line
+            };
 
-            // If no hybrid runs, use fallback styling
+            // Calculate selection for this line
+            let line_selection = self.selection.as_ref().and_then(|sel| {
+                let line_start = current_offset;
+                let line_end = current_offset + line.len();
+                if sel.end > line_start && sel.start < line_end {
+                    let adjusted_start = sel.start.saturating_sub(line_start);
+                    let adjusted_end = (sel.end - line_start).min(line.len());
+                    Some(adjusted_start..adjusted_end)
+                } else {
+                    None
+                }
+            });
+
+            // Get both the transformed content and the text runs
+            let display_text = self.hybrid_renderer.get_display_content(&line_text, line_cursor_position, line_selection.clone());
+            let line_runs = self.hybrid_renderer.generate_mixed_text_runs(&line_text, line_cursor_position, line_selection);
+
+            // Use the display text (transformed) for shaping, not the original line text
+            let text_to_shape = if display_text.is_empty() { " ".to_string() } else { display_text };
+            
+            // If no hybrid runs, use fallback styling based on display text length
             let text_runs = if line_runs.is_empty() {
                 vec![TextRun {
-                    len: line_text.len(),
+                    len: text_to_shape.len(),
                     font: gpui::Font {
                         family: "system-ui".into(),
                         features: gpui::FontFeatures::default(),
@@ -355,11 +360,11 @@ impl Element for EditorElement {
                 line_runs
             };
 
-            // Shape this line with its text runs
+            // Shape this line with the transformed display text and matching text runs
             let shaped_line =
                 window
                     .text_system()
-                    .shape_line(line_text.into(), font_size, &text_runs, None);
+                    .shape_line(text_to_shape.into(), font_size, &text_runs, None);
 
             max_width = max_width.max(shaped_line.width);
             shaped_lines.push(shaped_line);
