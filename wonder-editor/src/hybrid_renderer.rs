@@ -2,6 +2,13 @@ use std::ops::Range;
 use crate::markdown_parser::{ParsedToken, MarkdownParser, MarkdownToken};
 use gpui::{TextRun, rgb, Font, FontFeatures, FontWeight, FontStyle};
 
+#[derive(Debug, Clone)]
+pub struct StyledTextSegment {
+    pub text: String,
+    pub text_run: TextRun,
+    pub font_size: f32,
+}
+
 fn ranges_intersect(sel_start: usize, sel_end: usize, token_start: usize, token_end: usize) -> bool {
     sel_start <= token_end && sel_end >= token_start
 }
@@ -22,6 +29,150 @@ impl HybridTextRenderer {
         Self {
             parser: MarkdownParser::new(),
         }
+    }
+    
+    pub fn get_font_size_for_heading_level(&self, level: u32) -> f32 {
+        match level {
+            1 => 24.0, // H1 - largest
+            2 => 20.0, // H2 - large  
+            3 => 18.0, // H3 - medium-large
+            4 => 17.0, // H4 - medium
+            5 => 16.0, // H5 - regular (same as body)
+            6 => 15.0, // H6 - small
+            _ => 16.0, // Default for invalid levels
+        }
+    }
+    
+    pub fn get_font_size_for_code(&self) -> f32 {
+        14.0 // Slightly smaller for better code readability
+    }
+    
+    pub fn get_font_size_for_regular_text(&self) -> f32 {
+        16.0 // Standard body text size
+    }
+    
+    pub fn get_font_size_for_token(&self, token: &ParsedToken) -> f32 {
+        match &token.token_type {
+            MarkdownToken::Heading(level, _) => self.get_font_size_for_heading_level(*level),
+            MarkdownToken::Code(_) => self.get_font_size_for_code(),
+            _ => self.get_font_size_for_regular_text(),
+        }
+    }
+    
+    pub fn generate_styled_text_segments(&self, content: &str, cursor_position: usize, selection: Option<Range<usize>>) -> Vec<StyledTextSegment> {
+        if content.is_empty() {
+            return vec![];
+        }
+        
+        let token_modes = self.render_document(content, cursor_position, selection.clone());
+        let mut segments = Vec::new();
+        let mut current_pos = 0;
+        
+        // Sort tokens by start position to process them in order
+        let mut sorted_tokens: Vec<_> = token_modes.iter().collect();
+        sorted_tokens.sort_by_key(|(token, _)| token.start);
+        
+        for (token, mode) in sorted_tokens {
+            // Add any text before this token
+            if token.start > current_pos {
+                let before_text = &content[current_pos..token.start];
+                segments.push(StyledTextSegment {
+                    text: before_text.to_string(),
+                    text_run: TextRun {
+                        len: before_text.len(),
+                        font: Font {
+                            family: "system-ui".into(),
+                            features: FontFeatures::default(),
+                            weight: FontWeight::NORMAL,
+                            style: FontStyle::Normal,
+                            fallbacks: None,
+                        },
+                        color: rgb(0xcdd6f4).into(),
+                        background_color: None,
+                        underline: Default::default(),
+                        strikethrough: Default::default(),
+                    },
+                    font_size: self.get_font_size_for_regular_text(),
+                });
+            }
+            
+            // Handle the token based on its mode
+            let (display_text, font_weight, font_style, color, font_family, font_size) = match mode {
+                TokenRenderMode::Raw => {
+                    // Raw mode: show original markdown syntax
+                    let original_text = &content[token.start..token.end];
+                    (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x94a3b8), "system-ui", self.get_font_size_for_regular_text())
+                }
+                TokenRenderMode::Preview => {
+                    // Preview mode: show transformed content with appropriate styling and font size
+                    match &token.token_type {
+                        MarkdownToken::Bold(inner_content) => {
+                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Italic(inner_content) => {
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Heading(level, content) => {
+                            (content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_heading_level(*level))
+                        }
+                        MarkdownToken::Code(inner_content) => {
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xa6da95), "monospace", self.get_font_size_for_code())
+                        }
+                        _ => {
+                            // For other tokens, show original text
+                            let original_text = &content[token.start..token.end];
+                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_regular_text())
+                        }
+                    }
+                }
+            };
+            
+            segments.push(StyledTextSegment {
+                text: display_text.clone(),
+                text_run: TextRun {
+                    len: display_text.len(),
+                    font: Font {
+                        family: font_family.into(),
+                        features: FontFeatures::default(),
+                        weight: font_weight,
+                        style: font_style,
+                        fallbacks: None,
+                    },
+                    color: color.into(),
+                    background_color: None,
+                    underline: Default::default(),
+                    strikethrough: Default::default(),
+                },
+                font_size,
+            });
+            
+            current_pos = token.end;
+        }
+        
+        // Add any remaining text after the last token
+        if current_pos < content.len() {
+            let remaining_text = &content[current_pos..];
+            segments.push(StyledTextSegment {
+                text: remaining_text.to_string(),
+                text_run: TextRun {
+                    len: remaining_text.len(),
+                    font: Font {
+                        family: "system-ui".into(),
+                        features: FontFeatures::default(),
+                        weight: FontWeight::NORMAL,
+                        style: FontStyle::Normal,
+                        fallbacks: None,
+                    },
+                    color: rgb(0xcdd6f4).into(),
+                    background_color: None,
+                    underline: Default::default(),
+                    strikethrough: Default::default(),
+                },
+                font_size: self.get_font_size_for_regular_text(),
+            });
+        }
+        
+        segments
     }
     
     pub fn get_token_render_mode(&self, token: &ParsedToken, cursor_position: usize, selection: Option<Range<usize>>) -> TokenRenderMode {
@@ -672,5 +823,112 @@ mod tests {
         // Transformed: "Start bold and italic end" (25 chars)
         let end_pos = renderer.map_cursor_position(content, content.len(), None);
         assert_eq!(end_pos, 25); // Length of transformed content
+    }
+
+    #[test]
+    fn test_font_size_calculation_for_markdown_elements() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Test heading font sizes
+        assert_eq!(renderer.get_font_size_for_heading_level(1), 24.0);
+        assert_eq!(renderer.get_font_size_for_heading_level(2), 20.0);
+        assert_eq!(renderer.get_font_size_for_heading_level(3), 18.0);
+        assert_eq!(renderer.get_font_size_for_heading_level(4), 17.0);
+        assert_eq!(renderer.get_font_size_for_heading_level(5), 16.0);
+        assert_eq!(renderer.get_font_size_for_heading_level(6), 15.0);
+        
+        // Test other element font sizes
+        assert_eq!(renderer.get_font_size_for_code(), 14.0);
+        assert_eq!(renderer.get_font_size_for_regular_text(), 16.0);
+    }
+
+    #[test]
+    fn test_get_font_size_for_token() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Test heading tokens return proper font sizes
+        let h1_token = ParsedToken {
+            token_type: MarkdownToken::Heading(1, "Title".to_string()),
+            start: 0,
+            end: 7,
+        };
+        assert_eq!(renderer.get_font_size_for_token(&h1_token), 24.0);
+        
+        let h3_token = ParsedToken {
+            token_type: MarkdownToken::Heading(3, "Subtitle".to_string()),
+            start: 0,
+            end: 11,
+        };
+        assert_eq!(renderer.get_font_size_for_token(&h3_token), 18.0);
+        
+        // Test other token types
+        let bold_token = ParsedToken {
+            token_type: MarkdownToken::Bold("text".to_string()),
+            start: 0,
+            end: 8,
+        };
+        assert_eq!(renderer.get_font_size_for_token(&bold_token), 16.0);
+        
+        let code_token = ParsedToken {
+            token_type: MarkdownToken::Code("code".to_string()),
+            start: 0,
+            end: 6,
+        };
+        assert_eq!(renderer.get_font_size_for_token(&code_token), 14.0);
+    }
+
+    #[test]
+    fn test_generate_styled_text_segments() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Regular text **bold text** `code`";
+        
+        // With cursor outside all tokens, should generate 4 segments with different styles
+        let segments = renderer.generate_styled_text_segments(content, 100, None);
+        
+        // Should have 4 segments: "Regular text " (16px), "bold text" (16px bold), " " (16px), "code" (14px monospace)
+        assert_eq!(segments.len(), 4);
+        
+        // First segment: regular text before bold
+        assert_eq!(segments[0].text, "Regular text ");
+        assert_eq!(segments[0].font_size, 16.0);
+        assert_eq!(segments[0].text_run.font.weight, gpui::FontWeight::NORMAL);
+        
+        // Second segment: bold text (transformed, no asterisks)
+        assert_eq!(segments[1].text, "bold text");
+        assert_eq!(segments[1].font_size, 16.0);
+        assert_eq!(segments[1].text_run.font.weight, gpui::FontWeight::BOLD);
+        
+        // Third segment: space between bold and code
+        assert_eq!(segments[2].text, " ");
+        assert_eq!(segments[2].font_size, 16.0);
+        assert_eq!(segments[2].text_run.font.weight, gpui::FontWeight::NORMAL);
+        
+        // Fourth segment: code with smaller font and monospace
+        assert_eq!(segments[3].text, "code");
+        assert_eq!(segments[3].font_size, 14.0);
+        assert_eq!(segments[3].text_run.font.family.as_ref(), "monospace");
+    }
+
+    #[test]
+    fn test_heading_styling_with_different_font_sizes() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Test H1 with large font size
+        let content = "# Large Heading";
+        let segments = renderer.generate_styled_text_segments(content, 100, None);
+        
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "Large Heading");
+        assert_eq!(segments[0].font_size, 24.0); // H1 should be 24px
+        assert_eq!(segments[0].text_run.font.weight, gpui::FontWeight::BOLD);
+        
+        // Test H3 with medium font size
+        let content = "### Medium Heading";
+        let segments = renderer.generate_styled_text_segments(content, 100, None);
+        
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "Medium Heading");
+        assert_eq!(segments[0].font_size, 18.0); // H3 should be 18px
+        assert_eq!(segments[0].text_run.font.weight, gpui::FontWeight::BOLD);
     }
 }
