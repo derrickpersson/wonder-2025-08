@@ -19,6 +19,9 @@ pub struct MarkdownEditor {
     // ENG-138: Mouse state tracking for drag operations
     is_mouse_down: bool,
     mouse_down_position: Option<usize>,
+    // ENG-139: Click count tracking for double/triple-click selection
+    last_click_time: std::time::Instant,
+    last_click_position: Option<usize>,
 }
 
 impl MarkdownEditor {
@@ -35,6 +38,9 @@ impl MarkdownEditor {
             // ENG-138: Initialize mouse state
             is_mouse_down: false,
             mouse_down_position: None,
+            // ENG-139: Initialize click tracking
+            last_click_time: std::time::Instant::now(),
+            last_click_position: None,
         }
     }
 
@@ -51,6 +57,9 @@ impl MarkdownEditor {
             // ENG-138: Initialize mouse state
             is_mouse_down: false,
             mouse_down_position: None,
+            // ENG-139: Initialize click tracking
+            last_click_time: std::time::Instant::now(),
+            last_click_position: None,
         }
     }
 
@@ -119,15 +128,20 @@ impl MarkdownEditor {
         self.focused = true;
         
         // ENG-137/138: Convert mouse coordinates to character position
-        // We need to convert the screen position to a character position in the document
         let character_position = self.convert_point_to_character_index(event.position);
         
-        // Handle mouse down with positioning
-        self.handle_mouse_down_at_position(character_position);
+        // ENG-139: Detect click count for double/triple-click selection
+        let now = std::time::Instant::now();
+        let click_count = self.calculate_click_count(character_position, now);
         
-        // Set flag that we're potentially starting a drag operation
-        self.is_mouse_down = true;
-        self.mouse_down_position = Some(character_position);
+        // Handle different click types
+        self.handle_click_with_count(character_position, click_count);
+        
+        // Set flag that we're potentially starting a drag operation (only for single clicks)
+        if click_count == 1 {
+            self.is_mouse_down = true;
+            self.mouse_down_position = Some(character_position);
+        }
         
         cx.notify();
     }
@@ -199,6 +213,133 @@ impl MarkdownEditor {
         let absolute_position = chars_before_line + char_index_in_line;
         
         absolute_position.min(content.chars().count())
+    }
+
+    // ENG-139: Click count and selection helpers
+    fn calculate_click_count(&mut self, position: usize, now: std::time::Instant) -> u32 {
+        const DOUBLE_CLICK_TIME: std::time::Duration = std::time::Duration::from_millis(500);
+        const CLICK_POSITION_TOLERANCE: usize = 3; // Allow small position differences
+        
+        // Check if this is a rapid click at same position
+        let is_rapid_click = now.duration_since(self.last_click_time) <= DOUBLE_CLICK_TIME;
+        let is_same_position = self.last_click_position
+            .map(|last_pos| position.abs_diff(last_pos) <= CLICK_POSITION_TOLERANCE)
+            .unwrap_or(false);
+        
+        let click_count = if is_rapid_click && is_same_position {
+            // Determine if this is the second, third, etc. click
+            // For simplicity, we'll detect double-click vs triple-click based on timing
+            if now.duration_since(self.last_click_time) <= std::time::Duration::from_millis(250) {
+                3 // Very rapid = triple click
+            } else {
+                2 // Moderately rapid = double click
+            }
+        } else {
+            1 // Single click
+        };
+        
+        // Update tracking
+        self.last_click_time = now;
+        self.last_click_position = Some(position);
+        
+        click_count
+    }
+
+    fn handle_click_with_count(&mut self, position: usize, click_count: u32) {
+        match click_count {
+            1 => {
+                // Single click - position cursor
+                self.handle_mouse_down_at_position(position);
+            },
+            2 => {
+                // Double click - select word at position
+                self.select_word_at_position(position);
+            },
+            3 => {
+                // Triple click - select line at position  
+                self.select_line_at_position(position);
+            },
+            _ => {
+                // Fall back to single click for higher counts
+                self.handle_mouse_down_at_position(position);
+            }
+        }
+    }
+
+    fn select_word_at_position(&mut self, position: usize) {
+        let content = self.document.content();
+        let max_pos = content.chars().count();
+        let clamped_position = position.min(max_pos);
+        
+        // Find word boundaries around the clicked position
+        let (word_start, word_end) = self.find_word_boundaries(content, clamped_position);
+        
+        // Set selection to cover the word
+        self.document.set_cursor_position(word_start);
+        self.document.start_selection();
+        self.document.set_cursor_position(word_end);
+    }
+
+    fn select_line_at_position(&mut self, position: usize) {
+        let content = self.document.content();
+        let max_pos = content.chars().count();
+        let clamped_position = position.min(max_pos);
+        
+        // Find line boundaries around the clicked position
+        let (line_start, line_end) = self.find_line_boundaries(content, clamped_position);
+        
+        // Set selection to cover the line
+        self.document.set_cursor_position(line_start);
+        self.document.start_selection();
+        self.document.set_cursor_position(line_end);
+    }
+
+    fn find_word_boundaries(&self, content: &str, position: usize) -> (usize, usize) {
+        let chars: Vec<char> = content.chars().collect();
+        if chars.is_empty() || position >= chars.len() {
+            return (0, 0);
+        }
+        
+        // Find start of word (move left while character is word-like)
+        let mut start = position;
+        while start > 0 && self.is_word_char(chars[start.saturating_sub(1)]) {
+            start -= 1;
+        }
+        
+        // Find end of word (move right while character is word-like)
+        let mut end = position;
+        while end < chars.len() && self.is_word_char(chars[end]) {
+            end += 1;
+        }
+        
+        (start, end)
+    }
+
+    fn find_line_boundaries(&self, content: &str, position: usize) -> (usize, usize) {
+        let chars: Vec<char> = content.chars().collect();
+        if chars.is_empty() {
+            return (0, 0);
+        }
+        
+        let clamped_pos = position.min(chars.len());
+        
+        // Find start of line (move left until newline or beginning)
+        let mut start = clamped_pos;
+        while start > 0 && chars[start - 1] != '\n' {
+            start -= 1;
+        }
+        
+        // Find end of line (move right until newline or end)
+        let mut end = clamped_pos;
+        while end < chars.len() && chars[end] != '\n' {
+            end += 1;
+        }
+        
+        (start, end)
+    }
+
+    fn is_word_char(&self, ch: char) -> bool {
+        ch.is_alphanumeric() || ch == '_'
     }
 
     // Key event handler for special keys that don't go through EntityInputHandler
@@ -1417,6 +1558,113 @@ mod tests {
             self.handle_mouse_up_at_position(original_position)
         }
 
+        // ENG-139: Click count handling for double/triple-click selection
+        pub fn handle_click_at_position_with_click_count(&mut self, position: usize, click_count: u32) -> bool {
+            match click_count {
+                1 => {
+                    // Single click - position cursor
+                    self.handle_click_at_position(position)
+                },
+                2 => {
+                    // Double click - select word at position
+                    self.select_word_at_position(position)
+                },
+                3 => {
+                    // Triple click - select line at position
+                    self.select_line_at_position(position)
+                },
+                _ => {
+                    // Fall back to single click for higher counts
+                    self.handle_click_at_position(position)
+                }
+            }
+        }
+
+        // Helper method to select word at position
+        pub fn select_word_at_position(&mut self, position: usize) -> bool {
+            let content = self.document.content();
+            let max_pos = content.chars().count();
+            let clamped_position = position.min(max_pos);
+            
+            // Find word boundaries around the clicked position
+            let (word_start, word_end) = self.find_word_boundaries(content, clamped_position);
+            
+            // Set selection to cover the word
+            self.document.set_cursor_position(word_start);
+            self.document.start_selection();
+            self.document.set_cursor_position(word_end);
+            
+            true
+        }
+
+        // Helper method to select line at position
+        pub fn select_line_at_position(&mut self, position: usize) -> bool {
+            let content = self.document.content();
+            let max_pos = content.chars().count();
+            let clamped_position = position.min(max_pos);
+            
+            // Find line boundaries around the clicked position
+            let (line_start, line_end) = self.find_line_boundaries(content, clamped_position);
+            
+            // Set selection to cover the line
+            self.document.set_cursor_position(line_start);
+            self.document.start_selection();
+            self.document.set_cursor_position(line_end);
+            
+            true
+        }
+
+        // Helper method to find word boundaries
+        fn find_word_boundaries(&self, content: &str, position: usize) -> (usize, usize) {
+            let chars: Vec<char> = content.chars().collect();
+            if chars.is_empty() || position >= chars.len() {
+                return (0, 0);
+            }
+            
+            // Find start of word (move left while character is word-like)
+            let mut start = position;
+            while start > 0 && self.is_word_char(chars[start.saturating_sub(1)]) {
+                start -= 1;
+            }
+            
+            // Find end of word (move right while character is word-like)
+            let mut end = position;
+            while end < chars.len() && self.is_word_char(chars[end]) {
+                end += 1;
+            }
+            
+            (start, end)
+        }
+
+        // Helper method to find line boundaries
+        fn find_line_boundaries(&self, content: &str, position: usize) -> (usize, usize) {
+            let chars: Vec<char> = content.chars().collect();
+            if chars.is_empty() {
+                return (0, 0);
+            }
+            
+            let clamped_pos = position.min(chars.len());
+            
+            // Find start of line (move left until newline or beginning)
+            let mut start = clamped_pos;
+            while start > 0 && chars[start - 1] != '\n' {
+                start -= 1;
+            }
+            
+            // Find end of line (move right until newline or end)
+            let mut end = clamped_pos;
+            while end < chars.len() && chars[end] != '\n' {
+                end += 1;
+            }
+            
+            (start, end)
+        }
+
+        // Helper method to determine if a character is part of a word
+        fn is_word_char(&self, ch: char) -> bool {
+            ch.is_alphanumeric() || ch == '_'
+        }
+
         // Legacy action methods removed - now using InputRouter directly
     }
 
@@ -1934,6 +2182,88 @@ mod tests {
         println!("  H1 headings: 24px font size");
         println!("  Code blocks: 14px monospace font");
         println!("  Bold text: 16px with bold weight");
+    }
+
+    // ENG-139: Double/triple-click selection tests
+    #[test]
+    fn test_click_count_tracking() {
+        // RED: This test should fail because we haven't implemented click count tracking yet
+        let mut editor = new_with_content("Hello world test".to_string());
+        
+        // Simulate single click
+        let result = editor.handle_click_at_position_with_click_count(6, 1);
+        assert!(result, "Single click should succeed");
+        assert_eq!(editor.cursor_position(), 6, "Single click should position cursor");
+        assert!(!editor.has_selection(), "Single click should not create selection");
+        
+        // Simulate double click at same position
+        let result = editor.handle_click_at_position_with_click_count(6, 2);
+        assert!(result, "Double click should succeed");
+        assert!(editor.has_selection(), "Double click should create word selection");
+        assert_eq!(editor.selected_text(), Some("world".to_string()), "Double click should select word under cursor");
+        
+        // Simulate triple click at same position  
+        let result = editor.handle_click_at_position_with_click_count(6, 3);
+        assert!(result, "Triple click should succeed");
+        assert!(editor.has_selection(), "Triple click should create line selection");
+        assert_eq!(editor.selected_text(), Some("Hello world test".to_string()), "Triple click should select entire line");
+    }
+
+    #[test]
+    fn test_word_boundary_detection_edge_cases() {
+        // RED: This test should fail because our word boundary logic might not handle all edge cases
+        let mut editor = new_with_content("hello-world test_case another.word".to_string());
+        
+        // Test double-click on hyphenated word
+        let result = editor.handle_click_at_position_with_click_count(6, 2); // On 'world' in 'hello-world'
+        assert!(result, "Double click on hyphenated word should succeed");
+        assert_eq!(editor.selected_text(), Some("world".to_string()), "Should select 'world' part of hyphenated word");
+        
+        // Test double-click on underscore word
+        editor = new_with_content("hello-world test_case another.word".to_string());
+        let result = editor.handle_click_at_position_with_click_count(18, 2); // On 'case' in 'test_case'
+        assert!(result, "Double click on underscore word should succeed");
+        assert_eq!(editor.selected_text(), Some("test_case".to_string()), "Should select entire underscore word");
+        
+        // Test double-click on word with dot
+        editor = new_with_content("hello-world test_case another.word".to_string());
+        let result = editor.handle_click_at_position_with_click_count(30, 2); // On 'word' in 'another.word'
+        assert!(result, "Double click on dotted word should succeed");
+        assert_eq!(editor.selected_text(), Some("word".to_string()), "Should select 'word' part after dot");
+    }
+
+    #[test]
+    fn test_line_selection_multiline_document() {
+        // RED: Test triple-click line selection in multi-line context
+        let mut editor = new_with_content("First line\nSecond line here\nThird line".to_string());
+        
+        // Triple-click on second line
+        let result = editor.handle_click_at_position_with_click_count(15, 3); // On 'line' in 'Second line here'
+        assert!(result, "Triple click should succeed");
+        assert_eq!(editor.selected_text(), Some("Second line here".to_string()), "Should select entire second line");
+        
+        // Triple-click on first line
+        editor = new_with_content("First line\nSecond line here\nThird line".to_string());
+        let result = editor.handle_click_at_position_with_click_count(5, 3); // On 'First line'
+        assert!(result, "Triple click on first line should succeed");
+        assert_eq!(editor.selected_text(), Some("First line".to_string()), "Should select entire first line");
+    }
+
+    #[test]
+    fn test_markdown_token_word_selection() {
+        // RED: Test double-click word selection with markdown tokens
+        let mut editor = new_with_content("This **bold text** has formatting".to_string());
+        
+        // Double-click on 'bold' inside markdown token
+        let result = editor.handle_click_at_position_with_click_count(9, 2); // On 'bold' in '**bold text**'
+        assert!(result, "Double click in markdown token should succeed");
+        assert_eq!(editor.selected_text(), Some("bold".to_string()), "Should select 'bold' word within token");
+        
+        // Double-click on word outside token
+        editor = new_with_content("This **bold text** has formatting".to_string());
+        let result = editor.handle_click_at_position_with_click_count(23, 2); // On 'formatting'
+        assert!(result, "Double click outside token should succeed");
+        assert_eq!(editor.selected_text(), Some("formatting".to_string()), "Should select word outside token");
     }
 
     // ENG-137: Basic click-to-position cursor functionality tests
