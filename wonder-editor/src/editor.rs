@@ -176,6 +176,19 @@ impl MarkdownEditor {
 
     // Legacy action conversion removed - now using InputRouter directly
 
+    // ENG-137: Click-to-position functionality
+    pub fn handle_click_at_position(&mut self, position: usize) -> bool {
+        // Clamp position to document bounds
+        let max_pos = self.document.content().chars().count();
+        let clamped_position = position.min(max_pos);
+        
+        // Set cursor to clicked position and clear any existing selection
+        self.document.set_cursor_position(clamped_position);
+        self.document.clear_selection();
+        
+        true // Return true to indicate successful handling
+    }
+
     // Provide access to document for more complex operations
     pub fn document(&self) -> &TextDocument {
         &self.document
@@ -285,12 +298,46 @@ impl EntityInputHandler for MarkdownEditor {
 
     fn character_index_for_point(
         &mut self,
-        _point: Point<Pixels>,
+        point: Point<Pixels>,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        // For now, return cursor position - this would be used for mouse click positioning
-        Some(self.document.cursor_position())
+        // ENG-137: Basic click-to-position implementation
+        // Convert screen point to character index in the document
+        let padding = px(16.0);
+        let line_height = px(24.0);
+        
+        // Calculate which line was clicked based on y-coordinate
+        let relative_y = point.y - padding;
+        let line_index = (relative_y / line_height).floor() as usize;
+        
+        let content = self.document.content();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // If clicked beyond last line, return end of document
+        if line_index >= lines.len() {
+            let end_pos = content.chars().count();
+            self.handle_click_at_position(end_pos);
+            return Some(end_pos);
+        }
+        
+        // Calculate character position within the clicked line
+        let line_content = lines[line_index];
+        let relative_x = point.x - padding;
+        
+        // Simple character width approximation (will be improved in later tickets)
+        let font_size = px(16.0);
+        let approx_char_width = font_size * 0.6; // Rough approximation for now
+        let char_index_in_line = ((relative_x / approx_char_width).floor() as usize).min(line_content.chars().count());
+        
+        // Calculate absolute position in document
+        let chars_before_line: usize = lines.iter().take(line_index).map(|l| l.chars().count() + 1).sum(); // +1 for newline
+        let absolute_position = chars_before_line + char_index_in_line;
+        
+        // Update cursor position directly (this is called on the MarkdownEditor itself)
+        self.handle_click_at_position(absolute_position);
+        
+        Some(absolute_position)
     }
 }
 
@@ -1089,6 +1136,18 @@ mod tests {
             &mut self.document
         }
 
+        // ENG-137: Click-to-position functionality
+        pub fn handle_click_at_position(&mut self, position: usize) -> bool {
+            // Clamp position to document bounds
+            let max_pos = self.document.content().chars().count();
+            let clamped_position = position.min(max_pos);
+            
+            // Set cursor to clicked position
+            self.document.set_cursor_position(clamped_position);
+            
+            true // Return true to indicate successful handling
+        }
+
         // Legacy action methods removed - now using InputRouter directly
     }
 
@@ -1606,5 +1665,55 @@ mod tests {
         println!("  H1 headings: 24px font size");
         println!("  Code blocks: 14px monospace font");
         println!("  Bold text: 16px with bold weight");
+    }
+
+    // ENG-137: Basic click-to-position cursor functionality tests
+    #[test]
+    fn test_click_to_position_cursor_basic() {
+        // RED: This test should fail initially because we haven't implemented the functionality
+        let mut editor = new_with_content("Hello World".to_string());
+        
+        // Simulate clicking at position 6 (between "Hello" and " World")
+        // This should move cursor to position 5 (after "Hello")
+        let result = editor.handle_click_at_position(5);
+        
+        assert!(result, "Click handling should return true when successful");
+        assert_eq!(editor.cursor_position(), 5, "Cursor should be positioned at clicked location");
+    }
+
+    #[test]
+    fn test_click_to_position_multiline() {
+        // RED: Test multi-line click positioning
+        let mut editor = new_with_content("Line 1\nLine 2\nLine 3".to_string());
+        
+        // Click at beginning of line 2 (position 7, after "Line 1\n")
+        let result = editor.handle_click_at_position(7);
+        
+        assert!(result, "Multi-line click handling should succeed");
+        assert_eq!(editor.cursor_position(), 7, "Cursor should be at beginning of line 2");
+    }
+
+    #[test]
+    fn test_click_to_position_empty_document() {
+        // RED: Test clicking in empty document
+        let mut editor = new_with_buffer();
+        
+        // Click at position 0 in empty document
+        let result = editor.handle_click_at_position(0);
+        
+        assert!(result, "Click in empty document should succeed");
+        assert_eq!(editor.cursor_position(), 0, "Cursor should remain at position 0");
+    }
+
+    #[test]
+    fn test_click_beyond_content_bounds() {
+        // RED: Test clicking beyond document bounds
+        let mut editor = new_with_content("Short".to_string());
+        
+        // Click at position 100 (beyond document end)
+        let result = editor.handle_click_at_position(100);
+        
+        assert!(result, "Click beyond bounds should succeed");
+        assert_eq!(editor.cursor_position(), 5, "Cursor should be clamped to document end");
     }
 }
