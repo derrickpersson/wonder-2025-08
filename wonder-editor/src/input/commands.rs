@@ -33,6 +33,16 @@ pub enum EditorCommand {
     Cut,
     Paste,
     PasteWithoutFormatting,
+    MoveToWordStartPlatform,
+    MoveToWordEndPlatform,
+    ExtendSelectionToLineStart,
+    ExtendSelectionToLineEnd,
+    ExtendSelectionToDocumentStartPlatform,
+    ExtendSelectionToDocumentEndPlatform,
+    PageUpPlatform,
+    PageDownPlatform,
+    ExtendSelectionPageUp,
+    ExtendSelectionPageDown,
 }
 
 pub trait CommandExecutor {
@@ -158,6 +168,52 @@ impl CommandExecutor for TextDocument {
             }
             EditorCommand::PasteWithoutFormatting => {
                 self.paste(); // For now, same as regular paste
+                true
+            }
+            EditorCommand::MoveToWordStartPlatform => {
+                self.move_to_word_start();
+                true
+            }
+            EditorCommand::MoveToWordEndPlatform => {
+                self.move_to_word_end();
+                true
+            }
+            EditorCommand::ExtendSelectionToLineStart => {
+                self.extend_selection_to_line_start();
+                true
+            }
+            EditorCommand::ExtendSelectionToLineEnd => {
+                self.extend_selection_to_line_end();
+                true
+            }
+            EditorCommand::ExtendSelectionToDocumentStartPlatform => {
+                self.extend_selection_to_document_start();
+                true
+            }
+            EditorCommand::ExtendSelectionToDocumentEndPlatform => {
+                self.extend_selection_to_document_end();
+                true
+            }
+            EditorCommand::PageUpPlatform => {
+                self.move_page_up();
+                true
+            }
+            EditorCommand::PageDownPlatform => {
+                self.move_page_down();
+                true
+            }
+            EditorCommand::ExtendSelectionPageUp => {
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_page_up();
+                true
+            }
+            EditorCommand::ExtendSelectionPageDown => {
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_page_down();
                 true
             }
         }

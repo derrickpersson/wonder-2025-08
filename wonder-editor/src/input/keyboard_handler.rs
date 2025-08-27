@@ -36,8 +36,8 @@ impl KeyboardHandler {
             InputEvent::ArrowDown => EditorCommand::MoveCursorDown,
             InputEvent::ShiftArrowLeft => EditorCommand::ExtendSelectionLeft,
             InputEvent::ShiftArrowRight => EditorCommand::ExtendSelectionRight,
-            InputEvent::CmdArrowLeft => EditorCommand::MoveToWordStart,
-            InputEvent::CmdArrowRight => EditorCommand::MoveToWordEnd,
+            InputEvent::CmdArrowLeft => EditorCommand::MoveToLineStart,
+            InputEvent::CmdArrowRight => EditorCommand::MoveToLineEnd,
             InputEvent::CmdShiftArrowLeft => EditorCommand::ExtendSelectionToWordStart,
             InputEvent::CmdShiftArrowRight => EditorCommand::ExtendSelectionToWordEnd,
             InputEvent::CmdArrowUp => EditorCommand::MoveToDocumentStart,
@@ -59,6 +59,21 @@ impl KeyboardHandler {
             InputEvent::CtrlX => EditorCommand::Cut,
             InputEvent::CtrlV => EditorCommand::Paste,
             InputEvent::CtrlShiftV => EditorCommand::PasteWithoutFormatting,
+            InputEvent::OptionLeft => EditorCommand::MoveToWordStartPlatform,
+            InputEvent::OptionRight => EditorCommand::MoveToWordEndPlatform,
+            InputEvent::ShiftHome => EditorCommand::ExtendSelectionToLineStart,
+            InputEvent::ShiftEnd => EditorCommand::ExtendSelectionToLineEnd,
+            InputEvent::CtrlShiftHome => EditorCommand::ExtendSelectionToDocumentStartPlatform,
+            InputEvent::CtrlShiftEnd => EditorCommand::ExtendSelectionToDocumentEndPlatform,
+            InputEvent::CmdShiftHome => EditorCommand::ExtendSelectionToDocumentStartPlatform,
+            InputEvent::CmdShiftEnd => EditorCommand::ExtendSelectionToDocumentEndPlatform,
+            InputEvent::FnUp => EditorCommand::PageUpPlatform,
+            InputEvent::FnDown => EditorCommand::PageDownPlatform,
+            InputEvent::ShiftPageUp => EditorCommand::ExtendSelectionPageUp,
+            InputEvent::ShiftPageDown => EditorCommand::ExtendSelectionPageDown,
+            InputEvent::CtrlShiftUp => EditorCommand::ExtendSelectionPageUp,
+            InputEvent::CtrlShiftDown => EditorCommand::ExtendSelectionPageDown,
+            InputEvent::Escape => EditorCommand::ClearSelection,
         }
     }
 }
@@ -146,15 +161,15 @@ mod tests {
         let mut doc = TextDocument::with_content("Hello world test".to_string());
         doc.set_cursor_position(8); // Middle of "world"
         
-        // Test CmdArrowLeft - should go to start of word
+        // Test CmdArrowLeft - now moves to line start on macOS (changed behavior)
         let result = handler.handle_input_event(InputEvent::CmdArrowLeft, &mut doc);
         assert!(result);
-        assert_eq!(doc.cursor_position(), 6); // Start of "world"
+        assert_eq!(doc.cursor_position(), 0); // Line start
         
-        // Test CmdArrowRight - should go to end of word
+        // Test CmdArrowRight - now moves to line end on macOS (changed behavior)
         let result = handler.handle_input_event(InputEvent::CmdArrowRight, &mut doc);
         assert!(result);
-        assert_eq!(doc.cursor_position(), 11); // End of "world"
+        assert_eq!(doc.cursor_position(), 16); // Line end
     }
 
     #[test]
@@ -287,5 +302,75 @@ mod tests {
         assert!(result);
         assert_eq!(doc.content(), "Hello Hello");
         assert_eq!(doc.get_clipboard_content(), Some("world".to_string()));
+    }
+
+    #[test]
+    fn test_platform_specific_line_navigation_macos() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // Middle of "world"
+        
+        // On macOS, CmdLeft/Right should move to line boundaries (not word boundaries)
+        let result = handler.handle_input_event(InputEvent::CmdArrowLeft, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 0); // Should go to line start, not word start
+        
+        let result = handler.handle_input_event(InputEvent::CmdArrowRight, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 16); // Should go to line end, not word end
+    }
+
+    #[test]
+    fn test_option_arrow_word_navigation_macos() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // Middle of "world"
+        
+        // On macOS, Option+Left/Right should move to word boundaries
+        let result = handler.handle_input_event(InputEvent::OptionLeft, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 6); // Start of "world"
+        
+        let result = handler.handle_input_event(InputEvent::OptionRight, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 11); // End of "world"
+    }
+
+    #[test]
+    fn test_shift_home_end_selection() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(8); // Middle of "world"
+        
+        // Test Shift+Home - should extend selection to line start
+        let result = handler.handle_input_event(InputEvent::ShiftHome, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 0);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("Hello wo".to_string()));
+        
+        // Clear selection and test Shift+End
+        doc.clear_selection();
+        doc.set_cursor_position(8);
+        let result = handler.handle_input_event(InputEvent::ShiftEnd, &mut doc);
+        assert!(result);
+        assert_eq!(doc.cursor_position(), 16);
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("rld test".to_string()));
+    }
+
+    #[test]
+    fn test_escape_clears_selection() {
+        let handler = KeyboardHandler::new();
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(0);
+        doc.start_selection();
+        doc.set_cursor_position(5); // Select "Hello"
+        
+        assert!(doc.has_selection());
+        
+        let result = handler.handle_input_event(InputEvent::Escape, &mut doc);
+        assert!(result);
+        assert!(!doc.has_selection());
     }
 }

@@ -780,6 +780,20 @@ impl TextDocument {
         };
         self.set_cursor_position(new_cursor_pos);
     }
+
+    pub fn extend_selection_to_line_start(&mut self) {
+        if !self.has_selection() {
+            self.start_selection();
+        }
+        self.move_to_line_start();
+    }
+
+    pub fn extend_selection_to_line_end(&mut self) {
+        if !self.has_selection() {
+            self.start_selection();
+        }
+        self.move_to_line_end();
+    }
 }
 
 #[cfg(test)]
