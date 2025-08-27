@@ -59,6 +59,10 @@ pub enum Movement {
     // Document-level movement
     DocumentStart,
     DocumentEnd,
+    
+    // Page-level movement
+    PageUp,
+    PageDown,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +98,11 @@ mod tests {
     fn test_movement_variants() {
         assert_eq!(Movement::WordStart, Movement::WordStart);
         assert_ne!(Movement::WordStart, Movement::WordEnd);
+        
+        // Test page movement variants for ENG-134
+        assert_eq!(Movement::PageUp, Movement::PageUp);
+        assert_eq!(Movement::PageDown, Movement::PageDown);
+        assert_ne!(Movement::PageUp, Movement::PageDown);
     }
 
     #[test]

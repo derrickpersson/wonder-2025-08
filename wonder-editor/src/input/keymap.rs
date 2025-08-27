@@ -307,11 +307,21 @@ impl Keymap {
         // Shift+PageUp/Down - Extend selection by page
         self.bind(
             KeyBinding::with_modifiers("pageup", Modifiers::shift()),
-            EditorAction::ExtendSelection(Movement::Up) // TODO: Should be PageUp selection
+            EditorAction::ExtendSelection(Movement::PageUp)
         );
         self.bind(
             KeyBinding::with_modifiers("pagedown", Modifiers::shift()),
-            EditorAction::ExtendSelection(Movement::Down) // TODO: Should be PageDown selection
+            EditorAction::ExtendSelection(Movement::PageDown)
+        );
+        
+        // Ctrl+Shift+Up/Down - Page selection on macOS (alternative to Shift+PageUp/Down)
+        self.bind(
+            KeyBinding::with_modifiers("up", Modifiers::ctrl_shift()),
+            EditorAction::ExtendSelection(Movement::PageUp)
+        );
+        self.bind(
+            KeyBinding::with_modifiers("down", Modifiers::ctrl_shift()),
+            EditorAction::ExtendSelection(Movement::PageDown)
         );
 
         // Advanced deletion shortcuts
@@ -515,6 +525,34 @@ mod tests {
         assert_eq!(
             keymap.get(&ctrl_shift_k_binding),
             Some(&EditorAction::DeleteCurrentLine)
+        );
+
+        // Test enhanced page selection shortcuts from ENG-134
+        
+        // Test fixed Shift+PageUp/Down for proper page selection (not just Up/Down)
+        let shift_pageup_binding = KeyBinding::with_modifiers("pageup", Modifiers::shift());
+        assert_eq!(
+            keymap.get(&shift_pageup_binding),
+            Some(&EditorAction::ExtendSelection(Movement::PageUp))
+        );
+        
+        let shift_pagedown_binding = KeyBinding::with_modifiers("pagedown", Modifiers::shift());
+        assert_eq!(
+            keymap.get(&shift_pagedown_binding),
+            Some(&EditorAction::ExtendSelection(Movement::PageDown))
+        );
+        
+        // Test Ctrl+Shift+Up/Down for macOS page selection
+        let ctrl_shift_up_binding = KeyBinding::with_modifiers("up", Modifiers::ctrl_shift());
+        assert_eq!(
+            keymap.get(&ctrl_shift_up_binding),
+            Some(&EditorAction::ExtendSelection(Movement::PageUp))
+        );
+        
+        let ctrl_shift_down_binding = KeyBinding::with_modifiers("down", Modifiers::ctrl_shift());
+        assert_eq!(
+            keymap.get(&ctrl_shift_down_binding),
+            Some(&EditorAction::ExtendSelection(Movement::PageDown))
         );
     }
 

@@ -679,6 +679,8 @@ impl TextDocument {
             Movement::LineEnd => self.move_to_line_end(),
             Movement::DocumentStart => self.move_to_document_start(),
             Movement::DocumentEnd => self.move_to_document_end(),
+            Movement::PageUp => self.move_page_up(),
+            Movement::PageDown => self.move_page_down(),
         }
     }
 
@@ -717,6 +719,18 @@ impl TextDocument {
             }
             Movement::DocumentStart => self.extend_selection_to_document_start(),
             Movement::DocumentEnd => self.extend_selection_to_document_end(),
+            Movement::PageUp => {
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_page_up();
+            }
+            Movement::PageDown => {
+                if !self.has_selection() {
+                    self.start_selection();
+                }
+                self.move_page_down();
+            }
         }
     }
 
