@@ -16,6 +16,9 @@ pub struct MarkdownEditor {
     hybrid_renderer: HybridTextRenderer,
     focused: bool,
     focus_handle: FocusHandle,
+    // ENG-138: Mouse state tracking for drag operations
+    is_mouse_down: bool,
+    mouse_down_position: Option<usize>,
 }
 
 impl MarkdownEditor {
@@ -29,6 +32,9 @@ impl MarkdownEditor {
             hybrid_renderer: HybridTextRenderer::new(),
             focused: true, // Start focused
             focus_handle,
+            // ENG-138: Initialize mouse state
+            is_mouse_down: false,
+            mouse_down_position: None,
         }
     }
 
@@ -42,6 +48,9 @@ impl MarkdownEditor {
             hybrid_renderer: HybridTextRenderer::new(),
             focused: true, // Start focused
             focus_handle,
+            // ENG-138: Initialize mouse state
+            is_mouse_down: false,
+            mouse_down_position: None,
         }
     }
 
@@ -101,14 +110,95 @@ impl MarkdownEditor {
     // Mouse event handlers
     fn handle_mouse_down(
         &mut self,
-        _event: &gpui::MouseDownEvent,
+        event: &gpui::MouseDownEvent,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
         // Focus the editor when clicked
         window.focus(&self.focus_handle);
         self.focused = true;
+        
+        // ENG-137/138: Convert mouse coordinates to character position
+        // We need to convert the screen position to a character position in the document
+        let character_position = self.convert_point_to_character_index(event.position);
+        
+        // Handle mouse down with positioning
+        self.handle_mouse_down_at_position(character_position);
+        
+        // Set flag that we're potentially starting a drag operation
+        self.is_mouse_down = true;
+        self.mouse_down_position = Some(character_position);
+        
         cx.notify();
+    }
+
+    fn handle_mouse_up(
+        &mut self,
+        event: &gpui::MouseUpEvent,
+        _window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        // ENG-138: Handle mouse up for drag selection
+        if self.is_mouse_down {
+            let character_position = self.convert_point_to_character_index(event.position);
+            self.handle_mouse_up_at_position(character_position);
+            
+            self.is_mouse_down = false;
+            self.mouse_down_position = None;
+            
+            cx.notify();
+        }
+    }
+
+    fn handle_mouse_move(
+        &mut self,
+        event: &gpui::MouseMoveEvent,
+        _window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        // ENG-138: Handle mouse drag for selection
+        if self.is_mouse_down {
+            let character_position = self.convert_point_to_character_index(event.position);
+            self.handle_mouse_drag_to_position(character_position);
+            
+            cx.notify();
+        }
+    }
+
+    // Helper method to convert screen coordinates to character positions
+    fn convert_point_to_character_index(&self, point: Point<Pixels>) -> usize {
+        // Basic coordinate to character conversion
+        // This mimics the logic in character_index_for_point but for direct use
+        let padding = px(16.0);
+        let line_height = px(24.0);
+        
+        // Account for editor bounds (status bar height + editor padding)
+        let editor_content_y_offset = px(30.0) + padding; // Status bar height + padding
+        let relative_y = point.y - editor_content_y_offset;
+        let line_index = ((relative_y / line_height).floor() as usize).max(0);
+        
+        let content = self.document.content();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // If clicked beyond last line, return end of document
+        if line_index >= lines.len() {
+            return content.chars().count();
+        }
+        
+        // Calculate character position within the clicked line
+        let line_content = lines[line_index];
+        let relative_x = point.x - padding;
+        
+        // Simple character width approximation (will be improved with proper text measurement)
+        let font_size = px(16.0);
+        let approx_char_width = font_size * 0.6;
+        let char_index_in_line = ((relative_x / approx_char_width).floor() as usize).min(line_content.chars().count());
+        
+        // Calculate absolute position in document
+        let chars_before_line: usize = lines.iter().take(line_index).map(|l| l.chars().count() + 1).sum();
+        let absolute_position = chars_before_line + char_index_in_line;
+        
+        absolute_position.min(content.chars().count())
     }
 
     // Key event handler for special keys that don't go through EntityInputHandler
@@ -1072,11 +1162,16 @@ impl Render for MarkdownEditor {
         // Use a simple div with action handlers that wraps our hybrid editor
         div()
             .track_focus(&self.focus_handle)
-            // Legacy action handlers removed - now using InputRouter system
+            // ENG-137/138: Mouse event handlers for click-to-position and drag selection
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(Self::handle_mouse_down),
             )
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(Self::handle_mouse_up),
+            )
+            .on_mouse_move(cx.listener(Self::handle_mouse_move))
             .on_key_down(cx.listener(Self::handle_key_down))
             .size_full()
             .flex()
