@@ -451,6 +451,136 @@ impl HybridTextRenderer {
         text_runs
     }
     
+    // ENG-141: Coordinate mapping between display positions and original content positions
+    pub fn map_display_position_to_original(&self, content: &str, display_position: usize, cursor_position: usize, selection: Option<(usize, usize)>) -> usize {
+        if content.is_empty() {
+            return 0;
+        }
+        
+        // Get the tokens and their render modes for the current state
+        let selection_range = selection.map(|(start, end)| start..end);
+        let token_modes = self.render_document(content, cursor_position, selection_range);
+        
+        // If no tokens, display position maps directly to original position
+        if token_modes.is_empty() {
+            return display_position.min(content.chars().count());
+        }
+        
+        let mut display_pos = 0;
+        let mut original_pos = 0;
+        
+        // Sort tokens by start position
+        let mut sorted_tokens: Vec<_> = token_modes.iter().collect();
+        sorted_tokens.sort_by_key(|(token, _)| token.start);
+        
+        for (token, mode) in sorted_tokens {
+            // Add any text before this token
+            if token.start > original_pos {
+                let before_text = &content[original_pos..token.start];
+                let before_len = before_text.chars().count();
+                
+                // Check if display position falls in this before-token text
+                if display_position < display_pos + before_len {
+                    let offset = display_position - display_pos;
+                    return original_pos + offset;
+                }
+                
+                display_pos += before_len;
+                original_pos = token.start;
+            }
+            
+            // Handle the token based on its render mode
+            let (display_text, original_text) = match mode {
+                TokenRenderMode::Raw => {
+                    // Raw mode: display text is same as original
+                    let original_text = &content[token.start..token.end];
+                    (original_text.to_string(), original_text.to_string())
+                }
+                TokenRenderMode::Preview => {
+                    // Preview mode: display text is transformed
+                    let original_text = &content[token.start..token.end];
+                    let display_text = match &token.token_type {
+                        MarkdownToken::Bold(inner) => inner.clone(),
+                        MarkdownToken::Italic(inner) => inner.clone(),
+                        MarkdownToken::Code(inner) => inner.clone(),
+                        MarkdownToken::Heading(_, inner) => inner.clone(),
+                        _ => original_text.to_string(),
+                    };
+                    (display_text, original_text.to_string())
+                }
+            };
+            
+            let display_token_len = display_text.chars().count();
+            
+            // Check if display position falls within this token
+            if display_position < display_pos + display_token_len {
+                let offset_in_display = display_position - display_pos;
+                
+                match mode {
+                    TokenRenderMode::Raw => {
+                        // Raw mode: direct mapping
+                        return token.start + offset_in_display;
+                    }
+                    TokenRenderMode::Preview => {
+                        // Preview mode: need to map to original content
+                        // For most tokens, we'll map proportionally
+                        let original_token_len = original_text.chars().count();
+                        if display_token_len == 0 {
+                            return token.start;
+                        }
+                        
+                        // Proportional mapping for complex tokens
+                        let ratio = offset_in_display as f32 / display_token_len as f32;
+                        let original_offset = (ratio * original_token_len as f32).round() as usize;
+                        
+                        // For bold/italic tokens, map inside the content (skip the markers)
+                        match &token.token_type {
+                            MarkdownToken::Bold(_) => {
+                                // Map to inside the **content** part
+                                // Bold token structure: "**content**"
+                                // We want to map display position within content to original position within content
+                                return token.start + 2 + offset_in_display;
+                            }
+                            MarkdownToken::Italic(_) => {
+                                // Map to inside the *content* part  
+                                return token.start + 1 + original_offset.min(original_token_len.saturating_sub(2));
+                            }
+                            MarkdownToken::Code(_) => {
+                                // Map to inside the `content` part
+                                return token.start + 1 + original_offset.min(original_token_len.saturating_sub(2));
+                            }
+                            MarkdownToken::Heading(level, _) => {
+                                // Map to inside the heading content (after "# " or "## ", etc.)
+                                let prefix_len = *level as usize + 1; // "# " = 2, "## " = 3, etc.
+                                return token.start + prefix_len + offset_in_display;
+                            }
+                            _ => {
+                                return token.start + original_offset.min(original_token_len);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            display_pos += display_token_len;
+            original_pos = token.end;
+        }
+        
+        // If we're past all tokens, handle remaining text
+        if original_pos < content.len() {
+            let remaining_text = &content[original_pos..];
+            let remaining_len = remaining_text.chars().count();
+            
+            if display_position >= display_pos {
+                let offset = (display_position - display_pos).min(remaining_len);
+                return original_pos + offset;
+            }
+        }
+        
+        // Fallback: clamp to content bounds
+        display_position.min(content.chars().count())
+    }
+    
 }
 
 #[cfg(test)]

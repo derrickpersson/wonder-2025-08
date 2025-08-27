@@ -1148,6 +1148,31 @@ mod tests {
             true // Return true to indicate successful handling
         }
 
+        // ENG-141: Markdown-aware coordinate mapping functionality
+        pub fn handle_click_with_coordinate_mapping(&mut self, display_position: usize) -> bool {
+            use crate::hybrid_renderer::HybridTextRenderer;
+            
+            // Create a hybrid renderer to handle coordinate mapping
+            let renderer = HybridTextRenderer::new();
+            
+            // Get current cursor position to determine rendering mode
+            let cursor_pos = self.document.cursor_position();
+            let content = self.document.content();
+            
+            // Map from display position to original content position
+            let original_position = renderer.map_display_position_to_original(
+                content, 
+                display_position, 
+                cursor_pos,
+                self.document.selection_range()
+            );
+            
+            // Set cursor to the mapped original position
+            self.document.set_cursor_position(original_position);
+            
+            true
+        }
+
         // Legacy action methods removed - now using InputRouter directly
     }
 
@@ -1715,5 +1740,74 @@ mod tests {
         
         assert!(result, "Click beyond bounds should succeed");
         assert_eq!(editor.cursor_position(), 5, "Cursor should be clamped to document end");
+    }
+
+    // ENG-141: Markdown-aware mouse coordinate mapping tests
+    #[test]
+    fn test_coordinate_mapping_raw_vs_preview_mode() {
+        // RED: This test should fail because we haven't implemented markdown-aware coordinate mapping
+        let mut editor = new_with_content("**bold text** regular".to_string());
+        
+        // Position cursor outside bold token to trigger preview mode
+        editor.document_mut().set_cursor_position(20); // After "**bold text** regular"
+        
+        // In preview mode, "bold text" is displayed without asterisks
+        // Click at character index 5 (which should be inside the bold text in preview mode)
+        let result = editor.handle_click_with_coordinate_mapping(5);
+        
+        assert!(result, "Coordinate mapping should succeed");
+        // In preview mode, position 5 should map to position 7 in original content (after "**bold")
+        assert_eq!(editor.cursor_position(), 7, "Preview mode coordinate should map to correct original position");
+    }
+
+    #[test]
+    fn test_coordinate_mapping_different_font_sizes() {
+        // RED: Test coordinate mapping with different font sizes (H1, code)
+        let mut editor = new_with_content("# Big Title\n`code` text".to_string());
+        
+        // Position cursor to trigger preview mode
+        editor.document_mut().set_cursor_position(22); // After all content
+        
+        // Click at position 3 in first line (should be inside "Big Title" in preview)
+        let result = editor.handle_click_with_coordinate_mapping(3);
+        
+        assert!(result, "Font size coordinate mapping should succeed");
+        // Position 3 in preview should map to position 5 in original ("# Bi|g Title")
+        assert_eq!(editor.cursor_position(), 5, "H1 coordinate should map correctly");
+    }
+
+    #[test]
+    fn test_coordinate_mapping_raw_mode() {
+        // RED: Test that raw mode uses direct coordinate mapping
+        let mut editor = new_with_content("**bold text**".to_string());
+        
+        // Position cursor inside bold token to trigger raw mode
+        editor.document_mut().set_cursor_position(5); // Inside "**bol|d text**"
+        
+        // In raw mode, coordinates should map directly to original positions
+        let result = editor.handle_click_with_coordinate_mapping(3);
+        
+        assert!(result, "Raw mode coordinate mapping should succeed");
+        assert_eq!(editor.cursor_position(), 3, "Raw mode should use direct coordinate mapping");
+    }
+
+    #[test]
+    fn test_coordinate_mapping_preserves_positions_on_mode_switch() {
+        // RED: Test that cursor positions are preserved when switching modes
+        let mut editor = new_with_content("Text **bold** more".to_string());
+        
+        // Start in preview mode (cursor outside tokens)
+        editor.document_mut().set_cursor_position(17); // After "more"
+        let initial_pos = editor.cursor_position();
+        
+        // Move cursor into bold token (should switch to raw mode)
+        editor.document_mut().set_cursor_position(8); // Inside "**bol|d**"
+        
+        // Position should be preserved accurately
+        assert_eq!(editor.cursor_position(), 8, "Position should be preserved when switching to raw mode");
+        
+        // Move cursor back outside (should switch to preview mode)
+        editor.document_mut().set_cursor_position(initial_pos);
+        assert_eq!(editor.cursor_position(), 17, "Position should be preserved when switching back to preview mode");
     }
 }
