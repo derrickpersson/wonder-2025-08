@@ -249,12 +249,10 @@ impl TextDocument {
     // Cursor movement
     pub fn move_cursor_left(&mut self) {
         self.cursor.move_left();
-        self.selection.clear();
     }
 
     pub fn move_cursor_right(&mut self) {
         self.cursor.move_right(self.content.chars().count());
-        self.selection.clear();
     }
 
     // Selection extension methods
@@ -301,7 +299,6 @@ impl TextDocument {
             // When on first line, move to start of document
             self.set_cursor_position(0);
         }
-        self.selection.clear();
     }
 
     pub fn move_cursor_down(&mut self) {
@@ -314,14 +311,12 @@ impl TextDocument {
             // When on last line, move to end of document
             self.set_cursor_position(self.content.chars().count());
         }
-        self.selection.clear();
     }
 
     pub fn move_to_line_start(&mut self) {
         let (line_index, _) = self.get_cursor_line_and_column();
         let position = self.get_position_from_line_and_column(line_index, 0);
         self.set_cursor_position(position);
-        self.selection.clear();
     }
 
     pub fn move_to_line_end(&mut self) {
@@ -330,30 +325,25 @@ impl TextDocument {
         let line_length = lines.get(line_index).map(|line| line.chars().count()).unwrap_or(0);
         let position = self.get_position_from_line_and_column(line_index, line_length);
         self.set_cursor_position(position);
-        self.selection.clear();
     }
 
     pub fn move_to_document_start(&mut self) {
         self.set_cursor_position(0);
-        self.selection.clear();
     }
 
     pub fn move_to_document_end(&mut self) {
         self.set_cursor_position(self.content.chars().count());
-        self.selection.clear();
     }
 
     // Word navigation methods
     pub fn move_to_word_start(&mut self) {
         let position = self.find_word_start(self.cursor.position());
         self.set_cursor_position(position);
-        self.selection.clear();
     }
 
     pub fn move_to_word_end(&mut self) {
         let position = self.find_word_end(self.cursor.position());
         self.set_cursor_position(position);
-        self.selection.clear();
     }
 
     pub fn extend_selection_to_word_start(&mut self) {
@@ -397,7 +387,6 @@ impl TextDocument {
         let target_line = line_index.saturating_sub(10);
         let new_position = self.get_position_from_line_and_column(target_line, column);
         self.set_cursor_position(new_position);
-        self.selection.clear();
     }
 
     pub fn move_page_down(&mut self) {
@@ -407,7 +396,6 @@ impl TextDocument {
         let target_line = (line_index + 10).min(lines.len().saturating_sub(1));
         let new_position = self.get_position_from_line_and_column(target_line, column);
         self.set_cursor_position(new_position);
-        self.selection.clear();
     }
 
     pub fn extend_selection_to_document_start(&mut self) {
@@ -674,6 +662,9 @@ impl ActionHandler for TextDocument {
 impl TextDocument {
     /// Handle cursor movement actions
     fn handle_cursor_movement(&mut self, movement: Movement) {
+        // Clear selection before any cursor movement (without Shift key)
+        self.selection.clear();
+        
         match movement {
             Movement::Left => self.move_cursor_left(),
             Movement::Right => self.move_cursor_right(),
@@ -1323,6 +1314,8 @@ mod tests {
 
     #[test]
     fn test_cursor_movement_clears_selection() {
+        use crate::input::actions::{EditorAction, Movement};
+        
         let mut doc = TextDocument::with_content("line1\nline2\nline3".to_string());
         
         // Start at position 3 (in "line1")
@@ -1333,29 +1326,35 @@ mod tests {
         assert!(doc.has_selection());
         assert_eq!(doc.selected_text(), Some("e".to_string()));
         
-        // Move cursor up without Shift - should clear selection
-        doc.move_cursor_up();
-        assert!(!doc.has_selection(), "Up movement should clear selection");
+        // Test MoveCursor action (without Shift) clears selection
+        doc.handle_action(EditorAction::MoveCursor(Movement::Up));
+        assert!(!doc.has_selection(), "MoveCursor(Up) action should clear selection");
         
         // Create selection again
+        doc.set_cursor_position(3);
         doc.extend_selection_right();
         assert!(doc.has_selection());
         
-        // Move cursor down without Shift - should clear selection  
-        doc.move_cursor_down();
-        assert!(!doc.has_selection(), "Down movement should clear selection");
+        // Test MoveCursor action (without Shift) clears selection  
+        doc.handle_action(EditorAction::MoveCursor(Movement::Down));
+        assert!(!doc.has_selection(), "MoveCursor(Down) action should clear selection");
         
-        // Test left/right movements still work
+        // Test that ExtendSelection action (with Shift) does NOT clear selection
+        doc.set_cursor_position(3);
         doc.extend_selection_right();
         assert!(doc.has_selection());
+        let initial_length = doc.selected_text().unwrap().len();
         
-        doc.move_cursor_left();
-        assert!(!doc.has_selection(), "Left movement should clear selection");
+        doc.handle_action(EditorAction::ExtendSelection(Movement::Right));
+        assert!(doc.has_selection(), "ExtendSelection action should NOT clear selection");
+        let extended_length = doc.selected_text().unwrap().len();
+        assert!(extended_length > initial_length, "Selection should be extended, not cleared");
         
-        doc.extend_selection_left();
+        // Test other movement actions clear selection
+        doc.set_cursor_position(3);
+        doc.extend_selection_right();
         assert!(doc.has_selection());
-        
-        doc.move_cursor_right();
-        assert!(!doc.has_selection(), "Right movement should clear selection");
+        doc.handle_action(EditorAction::MoveCursor(Movement::LineStart));
+        assert!(!doc.has_selection(), "MoveCursor(LineStart) should clear selection");
     }
 }
