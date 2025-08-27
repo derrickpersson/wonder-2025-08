@@ -131,13 +131,23 @@ impl Keymap {
         self.bind(KeyBinding::new("up"), EditorAction::MoveCursor(Movement::Up));
         self.bind(KeyBinding::new("down"), EditorAction::MoveCursor(Movement::Down));
 
-        // Word movement (Cmd/Ctrl + Arrow)
+        // Line movement on macOS (Cmd + Arrow) - Fixed from word movement
         self.bind(
             KeyBinding::with_modifiers("left", Modifiers::cmd()),
-            EditorAction::MoveCursor(Movement::WordStart)
+            EditorAction::MoveCursor(Movement::LineStart)
         );
         self.bind(
             KeyBinding::with_modifiers("right", Modifiers::cmd()),
+            EditorAction::MoveCursor(Movement::LineEnd)
+        );
+        
+        // Word movement on macOS (Option + Arrow) - New
+        self.bind(
+            KeyBinding::with_modifiers("left", Modifiers::alt()),
+            EditorAction::MoveCursor(Movement::WordStart)
+        );
+        self.bind(
+            KeyBinding::with_modifiers("right", Modifiers::alt()),
             EditorAction::MoveCursor(Movement::WordEnd)
         );
 
@@ -165,13 +175,23 @@ impl Keymap {
             EditorAction::ExtendSelection(Movement::Right)
         );
 
-        // Word selection (Cmd/Ctrl + Shift + Arrow)
+        // Line selection on macOS (Cmd + Shift + Arrow) - Fixed from word selection
         self.bind(
             KeyBinding::with_modifiers("left", Modifiers::cmd_shift()),
-            EditorAction::ExtendSelection(Movement::WordStart)
+            EditorAction::ExtendSelection(Movement::LineStart)
         );
         self.bind(
             KeyBinding::with_modifiers("right", Modifiers::cmd_shift()),
+            EditorAction::ExtendSelection(Movement::LineEnd)
+        );
+        
+        // Word selection on macOS (Option + Shift + Arrow) - New  
+        self.bind(
+            KeyBinding::with_modifiers("left", Modifiers { alt: true, shift: true, ..Default::default() }),
+            EditorAction::ExtendSelection(Movement::WordStart)
+        );
+        self.bind(
+            KeyBinding::with_modifiers("right", Modifiers { alt: true, shift: true, ..Default::default() }),
             EditorAction::ExtendSelection(Movement::WordEnd)
         );
 
@@ -235,6 +255,55 @@ impl Keymap {
         self.bind(
             KeyBinding::with_modifiers("v", Modifiers::ctrl()),
             EditorAction::Paste
+        );
+        
+        // Missing navigation shortcuts from ENG-133
+        
+        // Shift+Home/End - Extend selection to line boundaries
+        self.bind(
+            KeyBinding::with_modifiers("home", Modifiers::shift()),
+            EditorAction::ExtendSelection(Movement::LineStart)
+        );
+        self.bind(
+            KeyBinding::with_modifiers("end", Modifiers::shift()),
+            EditorAction::ExtendSelection(Movement::LineEnd)
+        );
+        
+        // Ctrl+Shift+Home/End - Extend selection to document boundaries (Windows/Linux)
+        self.bind(
+            KeyBinding::with_modifiers("home", Modifiers::ctrl_shift()),
+            EditorAction::ExtendSelection(Movement::DocumentStart)
+        );
+        self.bind(
+            KeyBinding::with_modifiers("end", Modifiers::ctrl_shift()),
+            EditorAction::ExtendSelection(Movement::DocumentEnd)
+        );
+        
+        // Cmd+Shift+Home/End - Extend selection to document boundaries (macOS) 
+        self.bind(
+            KeyBinding::with_modifiers("home", Modifiers::cmd_shift()),
+            EditorAction::ExtendSelection(Movement::DocumentStart)
+        );
+        self.bind(
+            KeyBinding::with_modifiers("end", Modifiers::cmd_shift()),
+            EditorAction::ExtendSelection(Movement::DocumentEnd)
+        );
+        
+        // Escape - Clear selection
+        self.bind(
+            KeyBinding::new("escape"),
+            EditorAction::ClearSelection
+        );
+        
+        // Additional page navigation shortcuts
+        // Shift+PageUp/Down - Extend selection by page
+        self.bind(
+            KeyBinding::with_modifiers("pageup", Modifiers::shift()),
+            EditorAction::ExtendSelection(Movement::Up) // TODO: Should be PageUp selection
+        );
+        self.bind(
+            KeyBinding::with_modifiers("pagedown", Modifiers::shift()),
+            EditorAction::ExtendSelection(Movement::Down) // TODO: Should be PageDown selection
         );
     }
 
@@ -303,18 +372,41 @@ mod tests {
             Some(&EditorAction::MoveCursor(Movement::Left))
         );
 
-        // Test word movement
+        // Test line movement on macOS (Cmd+Left/Right - fixed from word movement)
         let cmd_left_binding = KeyBinding::with_modifiers("left", Modifiers::cmd());
         assert_eq!(
             keymap.get(&cmd_left_binding),
+            Some(&EditorAction::MoveCursor(Movement::LineStart))
+        );
+
+        // Test word movement on macOS (Option+Left/Right - new)
+        let alt_left_binding = KeyBinding::with_modifiers("left", Modifiers::alt());
+        assert_eq!(
+            keymap.get(&alt_left_binding),
             Some(&EditorAction::MoveCursor(Movement::WordStart))
         );
 
-        // Test selection
+        // Test line selection on macOS (Cmd+Shift+Left/Right - fixed from word selection)
         let cmd_shift_left_binding = KeyBinding::with_modifiers("left", Modifiers::cmd_shift());
         assert_eq!(
             keymap.get(&cmd_shift_left_binding),
-            Some(&EditorAction::ExtendSelection(Movement::WordStart))
+            Some(&EditorAction::ExtendSelection(Movement::LineStart))
+        );
+
+        // Test new shortcuts from ENG-133
+        
+        // Test Shift+Home/End for line selection
+        let shift_home_binding = KeyBinding::with_modifiers("home", Modifiers::shift());
+        assert_eq!(
+            keymap.get(&shift_home_binding),
+            Some(&EditorAction::ExtendSelection(Movement::LineStart))
+        );
+        
+        // Test Escape for clearing selection
+        let escape_binding = KeyBinding::new("escape");
+        assert_eq!(
+            keymap.get(&escape_binding),
+            Some(&EditorAction::ClearSelection)
         );
     }
 
