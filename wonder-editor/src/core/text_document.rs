@@ -1,4 +1,5 @@
 use super::{cursor::Cursor, selection::Selection};
+use ropey::Rope;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextDocument {
@@ -1017,6 +1018,52 @@ impl TextDocument {
     }
 }
 
+// ENG-144: RopeTextDocument for O(log n) performance
+#[derive(Debug, Clone)]
+pub struct RopeTextDocument {
+    content: Rope,
+    cursor: Cursor,
+    selection: Selection,
+}
+
+impl RopeTextDocument {
+    pub fn new() -> Self {
+        Self {
+            content: Rope::new(),
+            cursor: Cursor::new(),
+            selection: Selection::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.content.len_chars() == 0
+    }
+
+    pub fn cursor_position(&self) -> usize {
+        self.cursor.position()
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.selection.is_active()
+    }
+
+    pub fn content(&self) -> String {
+        self.content.to_string()
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        let position = self.cursor.position();
+        self.content.insert_char(position, ch);
+        self.cursor.set_position(position + 1);
+    }
+
+    pub fn insert_text(&mut self, text: &str) {
+        let position = self.cursor.position();
+        self.content.insert(position, text);
+        self.cursor.set_position(position + text.chars().count());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1356,5 +1403,54 @@ mod tests {
         assert!(doc.has_selection());
         doc.handle_action(EditorAction::MoveCursor(Movement::LineStart));
         assert!(!doc.has_selection(), "MoveCursor(LineStart) should clear selection");
+    }
+
+    // ENG-144: Rope data structure integration tests
+    #[test]
+    fn test_rope_text_document_creation() {
+        // RED: This test should fail because RopeTextDocument doesn't exist yet
+        let rope_doc = RopeTextDocument::new();
+        assert!(rope_doc.is_empty());
+        assert_eq!(rope_doc.cursor_position(), 0);
+        assert!(!rope_doc.has_selection());
+    }
+
+    #[test]
+    fn test_rope_text_insertion() {
+        // RED: This test should fail because insert_char method doesn't exist yet
+        let mut rope_doc = RopeTextDocument::new();
+        
+        rope_doc.insert_char('H');
+        assert_eq!(rope_doc.content(), "H");
+        assert_eq!(rope_doc.cursor_position(), 1);
+        
+        rope_doc.insert_char('i');
+        assert_eq!(rope_doc.content(), "Hi");
+        assert_eq!(rope_doc.cursor_position(), 2);
+    }
+
+    #[test]
+    fn test_rope_api_compatibility() {
+        // RED: Test that RopeTextDocument provides same API as TextDocument
+        let mut string_doc = TextDocument::new();
+        let mut rope_doc = RopeTextDocument::new();
+        
+        // Both should start empty
+        assert_eq!(string_doc.is_empty(), rope_doc.is_empty());
+        assert_eq!(string_doc.cursor_position(), rope_doc.cursor_position());
+        
+        // Both should handle identical operations
+        string_doc.insert_char('A');
+        rope_doc.insert_char('A');
+        
+        assert_eq!(string_doc.content(), rope_doc.content());
+        assert_eq!(string_doc.cursor_position(), rope_doc.cursor_position());
+        
+        // Test insert_text method compatibility
+        string_doc.insert_text("BC");
+        rope_doc.insert_text("BC");
+        
+        assert_eq!(string_doc.content(), rope_doc.content());
+        assert_eq!(string_doc.cursor_position(), rope_doc.cursor_position());
     }
 }
