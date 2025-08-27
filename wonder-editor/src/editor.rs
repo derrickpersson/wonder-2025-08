@@ -2,7 +2,7 @@ use crate::core::TextDocument;
 use crate::hybrid_renderer::HybridTextRenderer;
 use crate::input::InputRouter;
 use gpui::{
-    div, prelude::*, px, rgb, size, transparent_black, App, Bounds, Context,
+    div, prelude::*, px, rgb, size, transparent_black, App, Bounds, ClipboardItem, Context,
     Element, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Hsla,
     IntoElement, KeyDownEvent, LayoutId, Pixels, Point, Render, ShapedLine, TextRun,
     UTF16Selection, Window,
@@ -118,6 +118,40 @@ impl MarkdownEditor {
         _window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
+        // Special handling for clipboard operations that need GPUI context
+        let is_cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+        
+        if is_cmd_or_ctrl {
+            match event.keystroke.key.as_str() {
+                "c" => {
+                    // Copy to system clipboard
+                    if let Some(text) = self.document.copy() {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                    cx.notify();
+                    return;
+                }
+                "x" => {
+                    // Cut to system clipboard
+                    if let Some(text) = self.document.cut() {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                    cx.notify();
+                    return;
+                }
+                "v" => {
+                    // Paste from system clipboard
+                    let clipboard_text = cx.read_from_clipboard().and_then(|item| {
+                        item.text()
+                    });
+                    self.document.paste(clipboard_text);
+                    cx.notify();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        
         // Use the new InputRouter for keyboard handling
         let handled = self.input_router.handle_key_event(event, &mut self.document);
         

@@ -26,6 +26,11 @@ pub enum EditorAction {
     MoveToPosition(usize),
     PageUp,
     PageDown,
+    
+    // Clipboard operations
+    Copy,
+    Cut,
+    Paste,
 }
 
 #[derive(Debug, Clone, PartialEq)]

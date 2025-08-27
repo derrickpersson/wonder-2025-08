@@ -618,6 +618,22 @@ impl ActionHandler for TextDocument {
                 self.move_page_down();
                 true
             }
+            EditorAction::Copy => {
+                // For copy/cut/paste, we need special handling in the editor
+                // since we need access to the GPUI context for system clipboard
+                // The ActionHandler just prepares the data
+                self.copy();
+                true
+            }
+            EditorAction::Cut => {
+                self.cut();
+                true
+            }
+            EditorAction::Paste => {
+                // Paste with no external text (will use internal clipboard)
+                self.paste(None);
+                true
+            }
         }
     }
 }
@@ -677,32 +693,40 @@ impl TextDocument {
         }
     }
 
-    // Clipboard operations
-    pub fn copy(&mut self) {
+    // Clipboard operations - returns text to be copied to system clipboard
+    pub fn copy(&mut self) -> Option<String> {
         if self.has_selection() {
             // Copy selected text
             if let Some(text) = self.selected_text() {
-                self.clipboard = Some(text);
+                self.clipboard = Some(text.clone());
+                Some(text)
+            } else {
+                None
             }
         } else {
             // Copy current line
             let line_text = self.get_current_line_with_newline();
-            self.clipboard = Some(line_text);
+            self.clipboard = Some(line_text.clone());
+            Some(line_text)
         }
     }
 
-    pub fn cut(&mut self) {
+    pub fn cut(&mut self) -> Option<String> {
         if self.has_selection() {
             // Cut selected text
             if let Some(text) = self.selected_text() {
-                self.clipboard = Some(text);
+                self.clipboard = Some(text.clone());
                 self.delete_selection();
+                Some(text)
+            } else {
+                None
             }
         } else {
             // Cut current line
             let line_text = self.get_current_line_with_newline();
-            self.clipboard = Some(line_text);
+            self.clipboard = Some(line_text.clone());
             self.delete_current_line();
+            Some(line_text)
         }
     }
 
@@ -714,13 +738,16 @@ impl TextDocument {
         self.clipboard = Some(text);
     }
 
-    pub fn paste(&mut self) {
-        if let Some(content) = self.clipboard.clone() {
+    pub fn paste(&mut self, clipboard_text: Option<String>) {
+        // Try clipboard_text first (system clipboard), fallback to internal clipboard
+        let content = clipboard_text.or_else(|| self.clipboard.clone());
+        
+        if let Some(text) = content {
             if self.has_selection() {
                 // Replace selection with pasted content
                 self.delete_selection();
             }
-            self.insert_text(&content);
+            self.insert_text(&text);
         }
     }
 

@@ -208,6 +208,34 @@ impl Keymap {
             KeyBinding::with_modifiers("i", Modifiers::cmd()),
             EditorAction::ToggleFormat(FormatType::Italic)
         );
+        
+        // Clipboard operations (Cmd/Ctrl + C/X/V)
+        self.bind(
+            KeyBinding::with_modifiers("c", Modifiers::cmd()),
+            EditorAction::Copy
+        );
+        self.bind(
+            KeyBinding::with_modifiers("x", Modifiers::cmd()),
+            EditorAction::Cut
+        );
+        self.bind(
+            KeyBinding::with_modifiers("v", Modifiers::cmd()),
+            EditorAction::Paste
+        );
+        
+        // Also bind Ctrl versions for cross-platform support
+        self.bind(
+            KeyBinding::with_modifiers("c", Modifiers::ctrl()),
+            EditorAction::Copy
+        );
+        self.bind(
+            KeyBinding::with_modifiers("x", Modifiers::ctrl()),
+            EditorAction::Cut
+        );
+        self.bind(
+            KeyBinding::with_modifiers("v", Modifiers::ctrl()),
+            EditorAction::Paste
+        );
     }
 
     /// Get all key bindings (for debugging/inspection)
