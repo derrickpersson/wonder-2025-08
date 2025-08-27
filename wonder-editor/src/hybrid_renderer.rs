@@ -101,19 +101,19 @@ impl HybridTextRenderer {
                 TokenRenderMode::Raw => {
                     // Raw mode: show original markdown syntax
                     let original_text = &content[token.start..token.end];
-                    (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x94a3b8), "system-ui", self.get_font_size_for_regular_text())
+                    (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x94a3b8), "SF Pro", self.get_font_size_for_regular_text())
                 }
                 TokenRenderMode::Preview => {
                     // Preview mode: show transformed content with appropriate styling and font size
                     match &token.token_type {
                         MarkdownToken::Bold(inner_content) => {
-                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_regular_text())
+                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_regular_text())
                         }
                         MarkdownToken::Italic(inner_content) => {
-                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_regular_text())
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_regular_text())
                         }
                         MarkdownToken::Heading(level, content) => {
-                            (content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_heading_level(*level))
+                            (content.clone(), FontWeight::BOLD, FontStyle::Normal, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_heading_level(*level))
                         }
                         MarkdownToken::Code(inner_content) => {
                             (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xa6da95), "monospace", self.get_font_size_for_code())
@@ -121,7 +121,7 @@ impl HybridTextRenderer {
                         _ => {
                             // For other tokens, show original text
                             let original_text = &content[token.start..token.end];
-                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "system-ui", self.get_font_size_for_regular_text())
+                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_regular_text())
                         }
                     }
                 }

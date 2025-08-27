@@ -301,6 +301,7 @@ impl TextDocument {
             // When on first line, move to start of document
             self.set_cursor_position(0);
         }
+        self.selection.clear();
     }
 
     pub fn move_cursor_down(&mut self) {
@@ -313,12 +314,14 @@ impl TextDocument {
             // When on last line, move to end of document
             self.set_cursor_position(self.content.chars().count());
         }
+        self.selection.clear();
     }
 
     pub fn move_to_line_start(&mut self) {
         let (line_index, _) = self.get_cursor_line_and_column();
         let position = self.get_position_from_line_and_column(line_index, 0);
         self.set_cursor_position(position);
+        self.selection.clear();
     }
 
     pub fn move_to_line_end(&mut self) {
@@ -327,14 +330,17 @@ impl TextDocument {
         let line_length = lines.get(line_index).map(|line| line.chars().count()).unwrap_or(0);
         let position = self.get_position_from_line_and_column(line_index, line_length);
         self.set_cursor_position(position);
+        self.selection.clear();
     }
 
     pub fn move_to_document_start(&mut self) {
         self.set_cursor_position(0);
+        self.selection.clear();
     }
 
     pub fn move_to_document_end(&mut self) {
         self.set_cursor_position(self.content.chars().count());
+        self.selection.clear();
     }
 
     // Word navigation methods
@@ -1282,5 +1288,43 @@ mod tests {
         doc.delete_to_line_end();
         assert_eq!(doc.content(), "Hello");
         assert_eq!(doc.cursor_position(), 5);
+    }
+
+    #[test]
+    fn test_cursor_movement_clears_selection() {
+        let mut doc = TextDocument::with_content("line1\nline2\nline3".to_string());
+        
+        // Start at position 3 (in "line1")
+        doc.set_cursor_position(3);
+        
+        // Create a selection by extending right
+        doc.extend_selection_right(); // Select "e"
+        assert!(doc.has_selection());
+        assert_eq!(doc.selected_text(), Some("e".to_string()));
+        
+        // Move cursor up without Shift - should clear selection
+        doc.move_cursor_up();
+        assert!(!doc.has_selection(), "Up movement should clear selection");
+        
+        // Create selection again
+        doc.extend_selection_right();
+        assert!(doc.has_selection());
+        
+        // Move cursor down without Shift - should clear selection  
+        doc.move_cursor_down();
+        assert!(!doc.has_selection(), "Down movement should clear selection");
+        
+        // Test left/right movements still work
+        doc.extend_selection_right();
+        assert!(doc.has_selection());
+        
+        doc.move_cursor_left();
+        assert!(!doc.has_selection(), "Left movement should clear selection");
+        
+        doc.extend_selection_left();
+        assert!(doc.has_selection());
+        
+        doc.move_cursor_right();
+        assert!(!doc.has_selection(), "Right movement should clear selection");
     }
 }
