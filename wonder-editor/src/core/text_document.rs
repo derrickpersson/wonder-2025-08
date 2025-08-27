@@ -1291,6 +1291,37 @@ mod tests {
     }
 
     #[test]
+    fn test_delete_current_line() {
+        // Test deleting current line with multiple lines
+        let mut doc = TextDocument::with_content("line1\nline2\nline3".to_string());
+        doc.set_cursor_position(8); // In "line2"
+        doc.delete_current_line();
+        assert_eq!(doc.content(), "line1\nline3");
+        assert_eq!(doc.cursor_position(), 6); // Start of "line3"
+
+        // Test deleting first line
+        let mut doc = TextDocument::with_content("first\nsecond\nthird".to_string());
+        doc.set_cursor_position(2); // In "first"
+        doc.delete_current_line();
+        assert_eq!(doc.content(), "second\nthird");
+        assert_eq!(doc.cursor_position(), 0); // Start of document
+
+        // Test deleting last line
+        let mut doc = TextDocument::with_content("first\nsecond\nlast".to_string());
+        doc.set_cursor_position(15); // In "last"
+        doc.delete_current_line();
+        assert_eq!(doc.content(), "first\nsecond\n");
+        assert_eq!(doc.cursor_position(), 13); // End of content
+
+        // Test deleting single line
+        let mut doc = TextDocument::with_content("only line".to_string());
+        doc.set_cursor_position(5); // In "only line"
+        doc.delete_current_line();
+        assert_eq!(doc.content(), "");
+        assert_eq!(doc.cursor_position(), 0);
+    }
+
+    #[test]
     fn test_cursor_movement_clears_selection() {
         let mut doc = TextDocument::with_content("line1\nline2\nline3".to_string());
         
