@@ -297,6 +297,9 @@ impl TextDocument {
         if line_index > 0 {
             let new_position = self.get_position_from_line_and_column(line_index - 1, column);
             self.set_cursor_position(new_position);
+        } else {
+            // When on first line, move to start of document
+            self.set_cursor_position(0);
         }
     }
 
@@ -306,6 +309,9 @@ impl TextDocument {
         if line_index + 1 < lines.len() {
             let new_position = self.get_position_from_line_and_column(line_index + 1, column);
             self.set_cursor_position(new_position);
+        } else {
+            // When on last line, move to end of document
+            self.set_cursor_position(self.content.chars().count());
         }
     }
 
@@ -913,6 +919,31 @@ mod tests {
         
         doc.move_cursor_down();
         assert_eq!(doc.cursor_position(), 9); // Back to "Line 2"
+    }
+
+    #[test]
+    fn test_cursor_up_down_edge_cases() {
+        let mut doc = TextDocument::with_content("Line 1\nLine 2\nLine 3".to_string());
+        
+        // Test: cursor up from first line goes to start of document
+        doc.set_cursor_position(3); // Middle of "Line 1"
+        doc.move_cursor_up();
+        assert_eq!(doc.cursor_position(), 0); // Should go to start of document
+        
+        // Test: cursor down from last line goes to end of document  
+        doc.set_cursor_position(17); // Middle of "Line 3" 
+        doc.move_cursor_down();
+        assert_eq!(doc.cursor_position(), 20); // Should go to end of document (chars count)
+        
+        // Test: cursor up from first character goes to start
+        doc.set_cursor_position(0); // Start of document
+        doc.move_cursor_up();
+        assert_eq!(doc.cursor_position(), 0); // Should stay at start
+        
+        // Test: cursor down from last character goes to end
+        doc.set_cursor_position(20); // End of document
+        doc.move_cursor_down();
+        assert_eq!(doc.cursor_position(), 20); // Should stay at end
     }
 
     #[test]
