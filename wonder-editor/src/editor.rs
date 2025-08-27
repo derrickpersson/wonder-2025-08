@@ -189,6 +189,50 @@ impl MarkdownEditor {
         true // Return true to indicate successful handling
     }
 
+    // ENG-138: Drag selection functionality for real UI
+    pub fn handle_mouse_down_at_position(&mut self, position: usize) -> bool {
+        // Clamp position to document bounds
+        let max_pos = self.document.content().chars().count();
+        let clamped_position = position.min(max_pos);
+        
+        // Clear any existing selection and set cursor to clicked position
+        self.document.clear_selection();
+        self.document.set_cursor_position(clamped_position);
+        
+        // Note: We don't start selection immediately on mouse down
+        // Selection starts when mouse moves (drag begins)
+        
+        true
+    }
+
+    pub fn handle_mouse_drag_to_position(&mut self, position: usize) -> bool {
+        // Clamp position to document bounds
+        let max_pos = self.document.content().chars().count();
+        let clamped_position = position.min(max_pos);
+        
+        // If no selection is active, start one from current cursor position
+        if !self.document.has_selection() {
+            self.document.start_selection();
+        }
+        
+        // Extend selection to the new position
+        self.document.set_cursor_position(clamped_position);
+        
+        true
+    }
+
+    pub fn handle_mouse_up_at_position(&mut self, position: usize) -> bool {
+        // Clamp position to document bounds
+        let max_pos = self.document.content().chars().count();
+        let clamped_position = position.min(max_pos);
+        
+        // Finalize the selection at the release position
+        self.document.set_cursor_position(clamped_position);
+        
+        // Selection remains active after mouse up
+        true
+    }
+
     // Provide access to document for more complex operations
     pub fn document(&self) -> &TextDocument {
         &self.document
@@ -1136,6 +1180,15 @@ mod tests {
             &mut self.document
         }
 
+        // Convenience methods for easier testing
+        pub fn has_selection(&self) -> bool {
+            self.document.has_selection()
+        }
+
+        pub fn selected_text(&self) -> Option<String> {
+            self.document.selected_text()
+        }
+
         // ENG-137: Click-to-position functionality
         pub fn handle_click_at_position(&mut self, position: usize) -> bool {
             // Clamp position to document bounds
@@ -1171,6 +1224,102 @@ mod tests {
             self.document.set_cursor_position(original_position);
             
             true
+        }
+
+        // ENG-138: Drag selection functionality
+        pub fn handle_mouse_down_at_position(&mut self, position: usize) -> bool {
+            // Clamp position to document bounds
+            let max_pos = self.document.content().chars().count();
+            let clamped_position = position.min(max_pos);
+            
+            // Clear any existing selection and set cursor to clicked position
+            self.document.clear_selection();
+            self.document.set_cursor_position(clamped_position);
+            
+            // Note: We don't start selection immediately on mouse down
+            // Selection starts when mouse moves (drag begins)
+            
+            true
+        }
+
+        pub fn handle_mouse_drag_to_position(&mut self, position: usize) -> bool {
+            // Clamp position to document bounds
+            let max_pos = self.document.content().chars().count();
+            let clamped_position = position.min(max_pos);
+            
+            // If no selection is active, start one from current cursor position
+            if !self.document.has_selection() {
+                self.document.start_selection();
+            }
+            
+            // Extend selection to the new position
+            self.document.set_cursor_position(clamped_position);
+            
+            true
+        }
+
+        pub fn handle_mouse_up_at_position(&mut self, position: usize) -> bool {
+            // Clamp position to document bounds
+            let max_pos = self.document.content().chars().count();
+            let clamped_position = position.min(max_pos);
+            
+            // Finalize the selection at the release position
+            self.document.set_cursor_position(clamped_position);
+            
+            // Selection remains active after mouse up
+            true
+        }
+
+        // ENG-138 + ENG-141: Drag selection with coordinate mapping
+        pub fn handle_mouse_down_with_coordinate_mapping(&mut self, display_position: usize) -> bool {
+            use crate::hybrid_renderer::HybridTextRenderer;
+            
+            let renderer = HybridTextRenderer::new();
+            let cursor_pos = self.document.cursor_position();
+            let content = self.document.content();
+            
+            let original_position = renderer.map_display_position_to_original(
+                content, 
+                display_position, 
+                cursor_pos,
+                self.document.selection_range()
+            );
+            
+            self.handle_mouse_down_at_position(original_position)
+        }
+
+        pub fn handle_mouse_drag_with_coordinate_mapping(&mut self, display_position: usize) -> bool {
+            use crate::hybrid_renderer::HybridTextRenderer;
+            
+            let renderer = HybridTextRenderer::new();
+            let cursor_pos = self.document.cursor_position();
+            let content = self.document.content();
+            
+            let original_position = renderer.map_display_position_to_original(
+                content, 
+                display_position, 
+                cursor_pos,
+                self.document.selection_range()
+            );
+            
+            self.handle_mouse_drag_to_position(original_position)
+        }
+
+        pub fn handle_mouse_up_with_coordinate_mapping(&mut self, display_position: usize) -> bool {
+            use crate::hybrid_renderer::HybridTextRenderer;
+            
+            let renderer = HybridTextRenderer::new();
+            let cursor_pos = self.document.cursor_position();
+            let content = self.document.content();
+            
+            let original_position = renderer.map_display_position_to_original(
+                content, 
+                display_position, 
+                cursor_pos,
+                self.document.selection_range()
+            );
+            
+            self.handle_mouse_up_at_position(original_position)
         }
 
         // Legacy action methods removed - now using InputRouter directly
@@ -1809,5 +1958,131 @@ mod tests {
         // Move cursor back outside (should switch to preview mode)
         editor.document_mut().set_cursor_position(initial_pos);
         assert_eq!(editor.cursor_position(), 17, "Position should be preserved when switching back to preview mode");
+    }
+
+    // ENG-138: Click-and-drag text selection tests
+    #[test]
+    fn test_drag_selection_basic() {
+        // RED: This test should fail because we haven't implemented drag selection yet
+        let mut editor = new_with_content("Hello World Test".to_string());
+        
+        // Start drag at position 0 (beginning of "Hello")
+        let result = editor.handle_mouse_down_at_position(0);
+        assert!(result, "Mouse down should succeed");
+        assert!(!editor.has_selection(), "Should not have selection immediately on mouse down");
+        
+        // Drag to position 5 (end of "Hello")
+        let result = editor.handle_mouse_drag_to_position(5);
+        assert!(result, "Mouse drag should succeed");
+        assert!(editor.has_selection(), "Should have selection during drag");
+        assert_eq!(editor.selected_text(), Some("Hello".to_string()), "Should select 'Hello'");
+        
+        // Release mouse at position 5
+        let result = editor.handle_mouse_up_at_position(5);
+        assert!(result, "Mouse up should succeed");
+        assert!(editor.has_selection(), "Should maintain selection after mouse up");
+        assert_eq!(editor.selected_text(), Some("Hello".to_string()), "Should still have 'Hello' selected");
+    }
+
+    #[test]
+    fn test_drag_selection_multiline() {
+        // RED: Test drag selection across multiple lines
+        let mut editor = new_with_content("Line 1\nLine 2\nLine 3".to_string());
+        
+        // Debug: Let's understand the positions
+        // "Line 1\nLine 2\nLine 3"
+        //  0123456 7890123 4567890
+        //          ^       ^
+        //         pos 3   pos 10
+        
+        // Start drag at position 3 (middle of "Line 1" - after "Lin")
+        let result = editor.handle_mouse_down_at_position(3);
+        assert!(result, "Mouse down should succeed");
+        
+        // Drag to position 10 (middle of "Line 2" - after "Line 2\nLi")
+        let result = editor.handle_mouse_drag_to_position(10);
+        assert!(result, "Multi-line drag should succeed");
+        assert!(editor.has_selection(), "Should have selection during multi-line drag");
+        // From pos 3 to pos 10: "e 1\nLin" (but we got "e 1\nLin", so the test was wrong)
+        assert_eq!(editor.selected_text(), Some("e 1\nLin".to_string()), "Should select across lines");
+        
+        // Release mouse
+        let result = editor.handle_mouse_up_at_position(10);
+        assert!(result, "Mouse up should succeed");
+        assert!(editor.has_selection(), "Should maintain multi-line selection after mouse up");
+    }
+
+    #[test]
+    fn test_drag_selection_backwards() {
+        // RED: Test drag selection in reverse direction (drag left)
+        let mut editor = new_with_content("Hello World".to_string());
+        
+        // Start drag at position 11 (end of "Hello World")
+        let result = editor.handle_mouse_down_at_position(11);
+        assert!(result, "Mouse down should succeed");
+        
+        // Drag backwards to position 6 (start of "World")
+        let result = editor.handle_mouse_drag_to_position(6);
+        assert!(result, "Backwards drag should succeed");
+        assert!(editor.has_selection(), "Should have selection during backwards drag");
+        assert_eq!(editor.selected_text(), Some("World".to_string()), "Should select 'World' in reverse");
+        
+        // Release mouse
+        let result = editor.handle_mouse_up_at_position(6);
+        assert!(result, "Mouse up should succeed");
+        assert!(editor.has_selection(), "Should maintain backwards selection");
+    }
+
+    #[test]
+    fn test_drag_selection_with_markdown_coordinate_mapping() {
+        // RED: Test drag selection with coordinate mapping (combines ENG-138 + ENG-141)
+        let mut editor = new_with_content("**bold text** regular".to_string());
+        
+        // Position cursor outside to trigger preview mode
+        editor.document_mut().set_cursor_position(20);
+        
+        // Test that coordinate mapping drag selection works at all
+        let result = editor.handle_mouse_down_with_coordinate_mapping(0);
+        assert!(result, "Coordinate-mapped mouse down should succeed");
+        
+        let result = editor.handle_mouse_drag_with_coordinate_mapping(3);
+        assert!(result, "Coordinate-mapped drag should succeed");
+        assert!(editor.has_selection(), "Should have selection with coordinate mapping");
+        
+        // Just verify that we get some selection - the exact mapping details 
+        // are already tested in ENG-141 coordinate mapping tests
+        let selected = editor.selected_text().unwrap();
+        assert!(!selected.is_empty(), "Should have non-empty selection with coordinate mapping");
+        
+        // Release mouse
+        let result = editor.handle_mouse_up_with_coordinate_mapping(3);
+        assert!(result, "Coordinate-mapped mouse up should succeed");
+    }
+
+    #[test]
+    fn test_drag_selection_integration_with_keyboard() {
+        // RED: Test that drag selection works with existing keyboard selection
+        let mut editor = new_with_content("Test text here".to_string());
+        
+        // First create a keyboard selection
+        editor.document_mut().set_cursor_position(5); // After "Test "
+        editor.document_mut().start_selection();
+        editor.document_mut().set_cursor_position(9); // After "Test text"
+        assert!(editor.has_selection(), "Should have keyboard selection");
+        assert_eq!(editor.selected_text(), Some("text".to_string()), "Should select 'text'");
+        
+        // Now start a new drag selection (should replace keyboard selection)
+        let result = editor.handle_mouse_down_at_position(10);
+        assert!(result, "Mouse down should succeed");
+        
+        // Drag should clear previous selection and start new one
+        let result = editor.handle_mouse_drag_to_position(14);
+        assert!(result, "Mouse drag should succeed");
+        assert!(editor.has_selection(), "Should have new drag selection");
+        assert_eq!(editor.selected_text(), Some("here".to_string()), "Should select 'here', replacing keyboard selection");
+        
+        // Release mouse
+        let result = editor.handle_mouse_up_at_position(14);
+        assert!(result, "Mouse up should succeed");
     }
 }
