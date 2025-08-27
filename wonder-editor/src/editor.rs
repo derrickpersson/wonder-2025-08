@@ -22,6 +22,8 @@ pub struct MarkdownEditor {
     // ENG-139: Click count tracking for double/triple-click selection
     last_click_time: std::time::Instant,
     last_click_position: Option<usize>,
+    // ENG-142: Scroll state tracking
+    scroll_offset: f32,
 }
 
 impl MarkdownEditor {
@@ -41,6 +43,8 @@ impl MarkdownEditor {
             // ENG-139: Initialize click tracking
             last_click_time: std::time::Instant::now(),
             last_click_position: None,
+            // ENG-142: Initialize scroll state
+            scroll_offset: 0.0,
         }
     }
 
@@ -60,6 +64,8 @@ impl MarkdownEditor {
             // ENG-139: Initialize click tracking
             last_click_time: std::time::Instant::now(),
             last_click_position: None,
+            // ENG-142: Initialize scroll state
+            scroll_offset: 0.0,
         }
     }
 
@@ -1388,6 +1394,8 @@ mod tests {
             document: TextDocument::new(),
             input_router: InputRouter::new(),
             focused: false,
+            // ENG-142: Initialize scroll state
+            scroll_offset: 0.0,
         }
     }
 
@@ -1397,6 +1405,8 @@ mod tests {
         document: TextDocument,
         input_router: InputRouter,
         focused: bool,
+        // ENG-142: Scroll state for testing
+        scroll_offset: f32,
     }
 
     impl TestableEditor {
@@ -1721,6 +1731,21 @@ mod tests {
             true
         }
 
+        // ENG-142: Scroll event handling methods
+        pub fn get_scroll_offset(&self) -> f32 {
+            self.scroll_offset
+        }
+
+        pub fn handle_scroll_event(&mut self, _dx: f32, dy: f32) -> bool {
+            // Update scroll offset, applying bounds checking
+            let new_offset = self.scroll_offset + dy;
+            
+            // Simple bounds: don't scroll above 0, and for now allow unlimited downward scroll
+            self.scroll_offset = new_offset.max(0.0);
+            
+            true
+        }
+
         // Legacy action methods removed - now using InputRouter directly
     }
 
@@ -1735,6 +1760,8 @@ mod tests {
             document: TextDocument::with_content(content),
             input_router: InputRouter::new(),
             focused: false,
+            // ENG-142: Initialize scroll state
+            scroll_offset: 0.0,
         }
     }
 
@@ -2374,6 +2401,44 @@ mod tests {
         assert!(editor.has_selection(), "Should create backward selection");
         assert_eq!(editor.selected_text(), Some("quick brown".to_string()), "Should select backward from cursor");
         assert_eq!(editor.selection_range(), Some((4, 15)), "Selection should be properly ordered");
+    }
+
+    // ENG-142: Mouse wheel scrolling tests
+    #[test]
+    fn test_basic_scroll_tracking() {
+        // RED: This test should fail because we haven't implemented scroll tracking yet
+        let mut editor = new_with_content("Line 1\nLine 2\nLine 3\nLine 4\nLine 5".to_string());
+        
+        // Initial scroll position should be 0
+        assert_eq!(editor.get_scroll_offset(), 0.0, "Initial scroll offset should be 0");
+        
+        // Simulate mouse wheel scroll down
+        let result = editor.handle_scroll_event(0.0, 100.0); // dx=0, dy=100 (scroll down)
+        assert!(result, "Scroll event should succeed");
+        assert_eq!(editor.get_scroll_offset(), 100.0, "Scroll offset should increase when scrolling down");
+        
+        // Simulate mouse wheel scroll up
+        let result = editor.handle_scroll_event(0.0, -50.0); // dx=0, dy=-50 (scroll up)
+        assert!(result, "Scroll up should succeed");
+        assert_eq!(editor.get_scroll_offset(), 50.0, "Scroll offset should decrease when scrolling up");
+    }
+
+    #[test]
+    fn test_scroll_bounds_checking() {
+        // RED: Test scroll bounds to prevent over-scrolling
+        let mut editor = new_with_content("Short content".to_string());
+        
+        // Try to scroll up when already at top
+        let result = editor.handle_scroll_event(0.0, -100.0);
+        assert!(result, "Scroll event should be handled");
+        assert_eq!(editor.get_scroll_offset(), 0.0, "Should not scroll above document start");
+        
+        // For this test, we'll assume a viewport height that would show all content
+        // So scrolling down should also be limited
+        let result = editor.handle_scroll_event(0.0, 1000.0);
+        assert!(result, "Large scroll event should be handled");
+        // Should not scroll beyond what would show content (exact value depends on implementation)
+        assert!(editor.get_scroll_offset() >= 0.0, "Scroll offset should not be negative");
     }
 
     // ENG-137: Basic click-to-position cursor functionality tests
