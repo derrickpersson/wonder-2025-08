@@ -1035,16 +1035,54 @@ impl RopeTextDocument {
         }
     }
 
+    pub fn with_content(content: String) -> Self {
+        let mut cursor = Cursor::new();
+        cursor.set_position(content.chars().count());
+        Self {
+            content: Rope::from_str(&content),
+            cursor,
+            selection: Selection::new(),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.content.len_chars() == 0
+    }
+
+    pub fn len(&self) -> usize {
+        self.content.len_chars()
     }
 
     pub fn cursor_position(&self) -> usize {
         self.cursor.position()
     }
 
+    pub fn set_cursor_position(&mut self, position: usize) {
+        let max_pos = self.content.len_chars();
+        let clamped_position = position.min(max_pos);
+        self.cursor.set_position(clamped_position);
+    }
+
     pub fn has_selection(&self) -> bool {
         self.selection.is_active()
+    }
+
+    pub fn selection_range(&self) -> Option<(usize, usize)> {
+        self.selection.range(self.cursor.position())
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        self.selection_range().map(|(start, end)| {
+            self.content.slice(start..end).to_string()
+        })
+    }
+
+    pub fn start_selection(&mut self) {
+        self.selection.start(self.cursor.position());
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
     }
 
     pub fn content(&self) -> String {
@@ -1052,15 +1090,65 @@ impl RopeTextDocument {
     }
 
     pub fn insert_char(&mut self, ch: char) {
+        if self.has_selection() {
+            self.delete_selection();
+        }
+        
         let position = self.cursor.position();
         self.content.insert_char(position, ch);
-        self.cursor.set_position(position + 1);
+        let max_position = self.content.len_chars();
+        self.cursor.set_position((position + 1).min(max_position));
     }
 
     pub fn insert_text(&mut self, text: &str) {
+        if self.has_selection() {
+            self.delete_selection();
+        }
+        
         let position = self.cursor.position();
         self.content.insert(position, text);
-        self.cursor.set_position(position + text.chars().count());
+        let new_position = position + text.chars().count();
+        self.cursor.set_position(new_position);
+    }
+
+    pub fn delete_char(&mut self) -> bool {
+        if self.has_selection() {
+            return self.delete_selection();
+        }
+        
+        let position = self.cursor.position();
+        if position < self.content.len_chars() {
+            self.content.remove(position..position + 1);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn backspace(&mut self) -> bool {
+        if self.has_selection() {
+            return self.delete_selection();
+        }
+        
+        let position = self.cursor.position();
+        if position > 0 {
+            self.content.remove(position - 1..position);
+            self.cursor.move_left();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn delete_selection(&mut self) -> bool {
+        if let Some((start, end)) = self.selection_range() {
+            self.content.remove(start..end);
+            self.cursor.set_position(start);
+            self.selection.clear();
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -1431,7 +1519,7 @@ mod tests {
 
     #[test]
     fn test_rope_api_compatibility() {
-        // RED: Test that RopeTextDocument provides same API as TextDocument
+        // Test that RopeTextDocument provides same API as TextDocument
         let mut string_doc = TextDocument::new();
         let mut rope_doc = RopeTextDocument::new();
         
@@ -1452,5 +1540,67 @@ mod tests {
         
         assert_eq!(string_doc.content(), rope_doc.content());
         assert_eq!(string_doc.cursor_position(), rope_doc.cursor_position());
+    }
+
+    #[test]
+    fn test_rope_with_content_creation() {
+        let rope_doc = RopeTextDocument::with_content("Hello World".to_string());
+        assert_eq!(rope_doc.content(), "Hello World");
+        assert_eq!(rope_doc.cursor_position(), 11);
+        assert!(!rope_doc.has_selection());
+    }
+
+    #[test]
+    fn test_rope_deletion_operations() {
+        let mut rope_doc = RopeTextDocument::with_content("Hello World".to_string());
+        
+        // Test delete_char
+        rope_doc.set_cursor_position(5); // Before " World"
+        let result = rope_doc.delete_char();
+        assert!(result);
+        assert_eq!(rope_doc.content(), "HelloWorld");
+        assert_eq!(rope_doc.cursor_position(), 5);
+        
+        // Test backspace
+        let result = rope_doc.backspace();
+        assert!(result);
+        assert_eq!(rope_doc.content(), "HellWorld");
+        assert_eq!(rope_doc.cursor_position(), 4);
+    }
+
+    #[test]
+    fn test_rope_selection_operations() {
+        let mut rope_doc = RopeTextDocument::with_content("Hello World".to_string());
+        
+        // Test selection
+        rope_doc.set_cursor_position(6);
+        rope_doc.start_selection();
+        rope_doc.set_cursor_position(11);
+        
+        assert!(rope_doc.has_selection());
+        assert_eq!(rope_doc.selected_text(), Some("World".to_string()));
+        
+        // Test selection deletion
+        let result = rope_doc.delete_selection();
+        assert!(result);
+        assert_eq!(rope_doc.content(), "Hello ");
+        assert_eq!(rope_doc.cursor_position(), 6);
+        assert!(!rope_doc.has_selection());
+    }
+
+    #[test]
+    fn test_rope_insertion_with_selection() {
+        let mut rope_doc = RopeTextDocument::with_content("Hello World".to_string());
+        
+        // Select "World"
+        rope_doc.set_cursor_position(6);
+        rope_doc.start_selection();
+        rope_doc.set_cursor_position(11);
+        
+        // Insert should replace selection
+        rope_doc.insert_char('!');
+        assert_eq!(rope_doc.content(), "Hello !");
+        assert_eq!(rope_doc.cursor_position(), 7);
+        assert!(!rope_doc.has_selection());
     }
 }
