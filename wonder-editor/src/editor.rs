@@ -1396,6 +1396,10 @@ mod tests {
             focused: false,
             // ENG-142: Initialize scroll state
             scroll_offset: 0.0,
+            // ENG-143: Initialize context menu state
+            context_menu_visible: false,
+            context_menu_position: None,
+            simulated_clipboard_content: None,
         }
     }
 
@@ -1407,6 +1411,10 @@ mod tests {
         focused: bool,
         // ENG-142: Scroll state for testing
         scroll_offset: f32,
+        // ENG-143: Context menu state for testing
+        context_menu_visible: bool,
+        context_menu_position: Option<usize>,
+        simulated_clipboard_content: Option<String>,
     }
 
     impl TestableEditor {
@@ -1460,6 +1468,10 @@ mod tests {
 
         // ENG-137: Click-to-position functionality
         pub fn handle_click_at_position(&mut self, position: usize) -> bool {
+            // Hide context menu on left-click
+            self.context_menu_visible = false;
+            self.context_menu_position = None;
+            
             // Clamp position to document bounds
             let max_pos = self.document.content().chars().count();
             let clamped_position = position.min(max_pos);
@@ -1746,6 +1758,80 @@ mod tests {
             true
         }
 
+        // ENG-143: Context menu methods
+        pub fn is_context_menu_visible(&self) -> bool {
+            self.context_menu_visible
+        }
+
+        pub fn get_context_menu_position(&self) -> Option<usize> {
+            self.context_menu_position
+        }
+
+        pub fn handle_right_click_at_position(&mut self, position: usize) -> bool {
+            // Show context menu at the clicked position
+            self.context_menu_visible = true;
+            self.context_menu_position = Some(position);
+            true
+        }
+
+        pub fn is_context_menu_copy_enabled(&self) -> bool {
+            // Copy enabled when there's a selection
+            self.document.has_selection()
+        }
+
+        pub fn is_context_menu_cut_enabled(&self) -> bool {
+            // Cut enabled when there's a selection
+            self.document.has_selection()
+        }
+
+        pub fn is_context_menu_select_all_enabled(&self) -> bool {
+            // Select All always enabled
+            true
+        }
+
+        pub fn is_context_menu_paste_enabled(&self) -> bool {
+            // Paste enabled when there's clipboard content
+            self.simulated_clipboard_content.is_some()
+        }
+
+        pub fn simulate_clipboard_content(&mut self, content: String) {
+            self.simulated_clipboard_content = Some(content);
+        }
+
+        // ENG-143: Context menu action execution methods
+        pub fn execute_context_menu_copy(&mut self) -> bool {
+            if let Some(selected_text) = self.document.selected_text() {
+                self.simulated_clipboard_content = Some(selected_text);
+                true
+            } else {
+                false
+            }
+        }
+
+        pub fn execute_context_menu_cut(&mut self) -> bool {
+            if let Some(selected_text) = self.document.selected_text() {
+                self.simulated_clipboard_content = Some(selected_text);
+                self.document.delete_selection();
+                true
+            } else {
+                false
+            }
+        }
+
+        pub fn execute_context_menu_paste(&mut self) -> bool {
+            if let Some(clipboard_content) = &self.simulated_clipboard_content.clone() {
+                self.document.insert_text(clipboard_content);
+                true
+            } else {
+                false
+            }
+        }
+
+        pub fn execute_context_menu_select_all(&mut self) -> bool {
+            self.document.select_all();
+            true
+        }
+
         // Legacy action methods removed - now using InputRouter directly
     }
 
@@ -1762,6 +1848,10 @@ mod tests {
             focused: false,
             // ENG-142: Initialize scroll state
             scroll_offset: 0.0,
+            // ENG-143: Initialize context menu state
+            context_menu_visible: false,
+            context_menu_position: None,
+            simulated_clipboard_content: None,
         }
     }
 
@@ -2439,6 +2529,108 @@ mod tests {
         assert!(result, "Large scroll event should be handled");
         // Should not scroll beyond what would show content (exact value depends on implementation)
         assert!(editor.get_scroll_offset() >= 0.0, "Scroll offset should not be negative");
+    }
+
+    // ENG-143: Right-click context menu tests
+    #[test]
+    fn test_right_click_detection() {
+        // RED: This test should fail because we haven't implemented right-click detection yet
+        let mut editor = new_with_content("Hello world".to_string());
+        
+        // Initially no context menu should be visible
+        assert!(!editor.is_context_menu_visible(), "Context menu should initially be hidden");
+        
+        // Simulate right-click at position 6
+        let result = editor.handle_right_click_at_position(6);
+        assert!(result, "Right-click should succeed");
+        assert!(editor.is_context_menu_visible(), "Context menu should be visible after right-click");
+        assert_eq!(editor.get_context_menu_position(), Some(6), "Context menu should track click position");
+    }
+
+    #[test] 
+    fn test_context_menu_state_management() {
+        // RED: Test context menu show/hide behavior
+        let mut editor = new_with_content("Sample text for context menu".to_string());
+        
+        // Right-click to show menu
+        editor.handle_right_click_at_position(5);
+        assert!(editor.is_context_menu_visible(), "Menu should be visible");
+        
+        // Left-click should hide menu
+        editor.handle_click_at_position(10);
+        assert!(!editor.is_context_menu_visible(), "Menu should be hidden after left-click");
+        
+        // Right-click with selection should show menu with different options
+        editor.set_cursor_position(0);
+        editor.start_selection();
+        editor.set_cursor_position(6); // Select "Sample"
+        
+        editor.handle_right_click_at_position(3);
+        assert!(editor.is_context_menu_visible(), "Menu should show for selection");
+        assert!(editor.is_context_menu_copy_enabled(), "Copy should be enabled with selection");
+        assert!(editor.is_context_menu_cut_enabled(), "Cut should be enabled with selection");
+    }
+
+    #[test]
+    fn test_context_menu_item_states() {
+        // RED: Test context-sensitive menu item enabling/disabling
+        let mut editor = new_with_content("Text content".to_string());
+        
+        // Right-click with no selection
+        editor.handle_right_click_at_position(5);
+        assert!(!editor.is_context_menu_copy_enabled(), "Copy should be disabled without selection");
+        assert!(!editor.is_context_menu_cut_enabled(), "Cut should be disabled without selection");
+        assert!(editor.is_context_menu_select_all_enabled(), "Select All should always be enabled");
+        
+        // Add some text to clipboard (simulated)
+        editor.simulate_clipboard_content("clipboard text".to_string());
+        assert!(editor.is_context_menu_paste_enabled(), "Paste should be enabled with clipboard content");
+    }
+
+    #[test]
+    fn test_context_menu_hides_on_left_click() {
+        // RED: Test that context menu is hidden when user left-clicks
+        let mut editor = new_with_content("Hello World".to_string());
+        
+        // First, show context menu with right-click
+        editor.handle_right_click_at_position(5);
+        assert!(editor.is_context_menu_visible(), "Context menu should be visible after right-click");
+        
+        // Then left-click should hide the context menu
+        editor.handle_click_at_position(7);
+        assert!(!editor.is_context_menu_visible(), "Context menu should be hidden after left-click");
+        assert_eq!(editor.get_context_menu_position(), None, "Context menu position should be cleared");
+        
+        // Cursor should still be positioned correctly
+        assert_eq!(editor.cursor_position(), 7, "Cursor should be at clicked position");
+    }
+
+    #[test]
+    fn test_context_menu_action_execution() {
+        // RED: Test that context menu actions execute clipboard operations
+        let mut editor = new_with_content("Hello World".to_string());
+        
+        // Select "World" and show context menu
+        editor.document_mut().set_cursor_position(6);
+        editor.document_mut().start_selection();
+        editor.document_mut().set_cursor_position(11); // This extends selection to "World"
+        editor.handle_right_click_at_position(8);
+        
+        // Execute copy action
+        let result = editor.execute_context_menu_copy();
+        assert!(result, "Context menu copy should succeed");
+        assert_eq!(editor.simulated_clipboard_content, Some("World".to_string()), "Copy should put text in simulated clipboard");
+        
+        // Execute cut action
+        let result = editor.execute_context_menu_cut();
+        assert!(result, "Context menu cut should succeed");
+        assert_eq!(editor.content(), "Hello ", "Cut should remove selected text");
+        assert_eq!(editor.simulated_clipboard_content, Some("World".to_string()), "Cut should put text in simulated clipboard");
+        
+        // Execute paste action
+        let result = editor.execute_context_menu_paste();
+        assert!(result, "Context menu paste should succeed");
+        assert_eq!(editor.content(), "Hello World", "Paste should restore the text");
     }
 
     // ENG-137: Basic click-to-position cursor functionality tests
