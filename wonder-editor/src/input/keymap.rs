@@ -174,6 +174,14 @@ impl Keymap {
             KeyBinding::with_modifiers("right", Modifiers::shift()),
             EditorAction::ExtendSelection(Movement::Right)
         );
+        self.bind(
+            KeyBinding::with_modifiers("up", Modifiers::shift()),
+            EditorAction::ExtendSelection(Movement::Up)
+        );
+        self.bind(
+            KeyBinding::with_modifiers("down", Modifiers::shift()),
+            EditorAction::ExtendSelection(Movement::Down)
+        );
 
         // Line selection on macOS (Cmd + Shift + Arrow) - Fixed from word selection
         self.bind(
@@ -407,6 +415,19 @@ mod tests {
         assert_eq!(
             keymap.get(&escape_binding),
             Some(&EditorAction::ClearSelection)
+        );
+        
+        // Test Shift+Up/Down for vertical selection (bug fix)
+        let shift_up_binding = KeyBinding::with_modifiers("up", Modifiers::shift());
+        assert_eq!(
+            keymap.get(&shift_up_binding),
+            Some(&EditorAction::ExtendSelection(Movement::Up))
+        );
+        
+        let shift_down_binding = KeyBinding::with_modifiers("down", Modifiers::shift());
+        assert_eq!(
+            keymap.get(&shift_down_binding),
+            Some(&EditorAction::ExtendSelection(Movement::Down))
         );
     }
 
