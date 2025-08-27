@@ -382,7 +382,7 @@ impl Element for EditorElement {
                 vec![TextRun {
                     len: text_to_shape.len(),
                     font: gpui::Font {
-                        family: "system-ui".into(),
+                        family: "SF Pro".into(),
                         features: gpui::FontFeatures::default(),
                         weight: gpui::FontWeight::NORMAL,
                         style: gpui::FontStyle::Normal,
@@ -615,7 +615,7 @@ impl EditorElement {
                                 let text_run = TextRun {
                                     len: text_to_sel_start.len(),
                                     font: gpui::Font {
-                                        family: "system-ui".into(),
+                                        family: "SF Pro".into(),
                                         features: gpui::FontFeatures::default(),
                                         weight: gpui::FontWeight::NORMAL,
                                         style: gpui::FontStyle::Normal,
@@ -686,7 +686,7 @@ impl EditorElement {
                                 let text_run = TextRun {
                                     len: text_to_sel_end.len(),
                                     font: gpui::Font {
-                                        family: "system-ui".into(),
+                                        family: "SF Pro".into(),
                                         features: gpui::FontFeatures::default(),
                                         weight: gpui::FontWeight::NORMAL,
                                         style: gpui::FontStyle::Normal,
@@ -749,11 +749,19 @@ impl EditorElement {
                     };
                     
                     // Paint selection rectangle for this line
-                    if x_end > x_start {
+                    // For empty lines, show a minimum width selection to indicate the line is selected
+                    let selection_width = if x_end > x_start {
+                        x_end - x_start
+                    } else {
+                        // Empty line: show a small visual indicator (about 4 pixels wide)
+                        px(4.0)
+                    };
+                    
+                    if selection_width > px(0.0) {
                         window.paint_quad(gpui::PaintQuad {
                             bounds: Bounds {
                                 origin: bounds.origin + gpui::point(x_start, y_offset),
-                                size: size(x_end - x_start, line_height),
+                                size: size(selection_width, line_height),
                             },
                             background: selection_color.into(),
                             border_widths: gpui::Edges::all(px(0.0)),
@@ -850,7 +858,7 @@ impl EditorElement {
                     let text_run = TextRun {
                         len: text_up_to_cursor.len(),
                         font: gpui::Font {
-                            family: "system-ui".into(),
+                            family: "SF Pro".into(),
                             features: gpui::FontFeatures::default(),
                             weight: gpui::FontWeight::NORMAL,
                             style: gpui::FontStyle::Normal,

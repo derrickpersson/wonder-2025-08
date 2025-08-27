@@ -640,6 +640,27 @@ impl ActionHandler for TextDocument {
                 self.paste(None);
                 true
             }
+            // Advanced deletion operations
+            EditorAction::DeletePreviousWord => {
+                self.delete_previous_word();
+                true
+            }
+            EditorAction::DeleteNextWord => {
+                self.delete_next_word();
+                true
+            }
+            EditorAction::DeleteToLineStart => {
+                self.delete_to_line_start();
+                true
+            }
+            EditorAction::DeleteToLineEnd => {
+                self.delete_to_line_end();
+                true
+            }
+            EditorAction::DeleteCurrentLine => {
+                self.delete_current_line();
+                true
+            }
         }
     }
 }
@@ -826,6 +847,162 @@ impl TextDocument {
             self.start_selection();
         }
         self.move_to_line_end();
+    }
+
+    /// Delete the previous word from cursor position
+    pub fn delete_previous_word(&mut self) {
+        let cursor_pos = self.cursor_position();
+        let content_chars: Vec<char> = self.content.chars().collect();
+        
+        if cursor_pos == 0 {
+            return; // Nothing to delete
+        }
+        
+        // Find start of previous word
+        let word_start = self.find_word_boundary_backward(cursor_pos);
+        
+        // Delete from word start to cursor
+        let new_content: String = content_chars[..word_start]
+            .iter()
+            .chain(content_chars[cursor_pos..].iter())
+            .collect();
+        
+        self.content = new_content;
+        self.set_cursor_position(word_start);
+    }
+
+    /// Delete the next word from cursor position
+    pub fn delete_next_word(&mut self) {
+        let cursor_pos = self.cursor_position();
+        let content_chars: Vec<char> = self.content.chars().collect();
+        
+        if cursor_pos >= content_chars.len() {
+            return; // Nothing to delete
+        }
+        
+        // Find end of next word
+        let word_end = self.find_word_boundary_forward(cursor_pos);
+        
+        // Delete from cursor to word end
+        let new_content: String = content_chars[..cursor_pos]
+            .iter()
+            .chain(content_chars[word_end..].iter())
+            .collect();
+        
+        self.content = new_content;
+        // Cursor position stays the same
+    }
+
+    /// Delete from cursor to line start
+    pub fn delete_to_line_start(&mut self) {
+        let cursor_pos = self.cursor_position();
+        let content_chars: Vec<char> = self.content.chars().collect();
+        
+        // Find line start
+        let mut line_start = cursor_pos;
+        while line_start > 0 && content_chars.get(line_start - 1) != Some(&'\n') {
+            line_start -= 1;
+        }
+        
+        // Delete from line start to cursor
+        let new_content: String = content_chars[..line_start]
+            .iter()
+            .chain(content_chars[cursor_pos..].iter())
+            .collect();
+        
+        self.content = new_content;
+        self.set_cursor_position(line_start);
+    }
+
+    /// Delete from cursor to line end
+    pub fn delete_to_line_end(&mut self) {
+        let cursor_pos = self.cursor_position();
+        let content_chars: Vec<char> = self.content.chars().collect();
+        
+        // Find line end (not including newline)
+        let mut line_end = cursor_pos;
+        while line_end < content_chars.len() && content_chars.get(line_end) != Some(&'\n') {
+            line_end += 1;
+        }
+        
+        // Delete from cursor to line end
+        let new_content: String = content_chars[..cursor_pos]
+            .iter()
+            .chain(content_chars[line_end..].iter())
+            .collect();
+        
+        self.content = new_content;
+        // Cursor position stays the same
+    }
+
+    /// Find word boundary going backward from position
+    fn find_word_boundary_backward(&self, from_pos: usize) -> usize {
+        let content_chars: Vec<char> = self.content.chars().collect();
+        let mut pos = from_pos;
+        
+        if pos == 0 {
+            return 0;
+        }
+        
+        // Skip any whitespace immediately before cursor
+        while pos > 0 && content_chars[pos - 1].is_whitespace() {
+            pos -= 1;
+        }
+        
+        if pos == 0 {
+            return 0;
+        }
+        
+        // Now find the start of the current word
+        let first_char = content_chars[pos - 1];
+        if first_char.is_alphanumeric() || first_char == '_' {
+            // Alphanumeric word
+            while pos > 0 && (content_chars[pos - 1].is_alphanumeric() || content_chars[pos - 1] == '_') {
+                pos -= 1;
+            }
+        } else {
+            // Punctuation word
+            while pos > 0 && !content_chars[pos - 1].is_alphanumeric() && !content_chars[pos - 1].is_whitespace() && content_chars[pos - 1] != '_' {
+                pos -= 1;
+            }
+        }
+        
+        pos
+    }
+
+    /// Find word boundary going forward from position  
+    fn find_word_boundary_forward(&self, from_pos: usize) -> usize {
+        let content_chars: Vec<char> = self.content.chars().collect();
+        let mut pos = from_pos;
+        
+        if pos >= content_chars.len() {
+            return content_chars.len();
+        }
+        
+        // Skip any whitespace at cursor
+        while pos < content_chars.len() && content_chars[pos].is_whitespace() {
+            pos += 1;
+        }
+        
+        if pos >= content_chars.len() {
+            return content_chars.len();
+        }
+        
+        // Now find the end of the current word
+        let first_char = content_chars[pos];
+        if first_char.is_alphanumeric() || first_char == '_' {
+            // Alphanumeric word
+            while pos < content_chars.len() && (content_chars[pos].is_alphanumeric() || content_chars[pos] == '_') {
+                pos += 1;
+            }
+        } else {
+            // Punctuation word
+            while pos < content_chars.len() && !content_chars[pos].is_alphanumeric() && !content_chars[pos].is_whitespace() && content_chars[pos] != '_' {
+                pos += 1;
+            }
+        }
+        
+        pos
     }
 }
 
@@ -1055,5 +1232,41 @@ mod tests {
         // Test Cmd+Down (move to document end)
         doc.move_to_document_end();
         assert_eq!(doc.cursor_position(), 20); // End of document
+    }
+
+    #[test]
+    fn test_delete_previous_word() {
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(11); // After "world"
+        doc.delete_previous_word();
+        assert_eq!(doc.content(), "Hello  test");
+        assert_eq!(doc.cursor_position(), 6); // Start of deleted word
+    }
+
+    #[test]
+    fn test_delete_next_word() {
+        let mut doc = TextDocument::with_content("Hello world test".to_string());
+        doc.set_cursor_position(6); // Before "world"
+        doc.delete_next_word();
+        assert_eq!(doc.content(), "Hello  test");
+        assert_eq!(doc.cursor_position(), 6); // Cursor stays in place
+    }
+
+    #[test]
+    fn test_delete_to_line_start() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(6); // Before "world"
+        doc.delete_to_line_start();
+        assert_eq!(doc.content(), "world");
+        assert_eq!(doc.cursor_position(), 0);
+    }
+
+    #[test]
+    fn test_delete_to_line_end() {
+        let mut doc = TextDocument::with_content("Hello world".to_string());
+        doc.set_cursor_position(5); // After "Hello"
+        doc.delete_to_line_end();
+        assert_eq!(doc.content(), "Hello");
+        assert_eq!(doc.cursor_position(), 5);
     }
 }

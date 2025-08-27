@@ -313,6 +313,46 @@ impl Keymap {
             KeyBinding::with_modifiers("pagedown", Modifiers::shift()),
             EditorAction::ExtendSelection(Movement::Down) // TODO: Should be PageDown selection
         );
+
+        // Advanced deletion shortcuts
+        
+        // Word deletion: Option+Backspace/Delete (macOS) and Ctrl+Backspace/Delete (cross-platform)
+        self.bind(
+            KeyBinding::with_modifiers("backspace", Modifiers::alt()),
+            EditorAction::DeletePreviousWord
+        );
+        self.bind(
+            KeyBinding::with_modifiers("backspace", Modifiers::ctrl()),
+            EditorAction::DeletePreviousWord
+        );
+        self.bind(
+            KeyBinding::with_modifiers("delete", Modifiers::alt()),
+            EditorAction::DeleteNextWord
+        );
+        self.bind(
+            KeyBinding::with_modifiers("delete", Modifiers::ctrl()),
+            EditorAction::DeleteNextWord
+        );
+        
+        // Line deletion: Cmd+Backspace/Delete (macOS only)
+        self.bind(
+            KeyBinding::with_modifiers("backspace", Modifiers::cmd()),
+            EditorAction::DeleteToLineStart
+        );
+        self.bind(
+            KeyBinding::with_modifiers("delete", Modifiers::cmd()),
+            EditorAction::DeleteToLineEnd
+        );
+        
+        // Current line deletion: Cmd+Shift+K (macOS) and Ctrl+Shift+K (cross-platform)
+        self.bind(
+            KeyBinding::with_modifiers("k", Modifiers::cmd_shift()),
+            EditorAction::DeleteCurrentLine
+        );
+        self.bind(
+            KeyBinding::with_modifiers("k", Modifiers::ctrl_shift()),
+            EditorAction::DeleteCurrentLine
+        );
     }
 
     /// Get all key bindings (for debugging/inspection)
@@ -428,6 +468,53 @@ mod tests {
         assert_eq!(
             keymap.get(&shift_down_binding),
             Some(&EditorAction::ExtendSelection(Movement::Down))
+        );
+
+        // Test advanced deletion shortcuts from ENG-132
+        
+        // Test word deletion shortcuts (Option+Backspace for macOS, Ctrl+Backspace for cross-platform)
+        let alt_backspace_binding = KeyBinding::with_modifiers("backspace", Modifiers::alt());
+        assert_eq!(
+            keymap.get(&alt_backspace_binding),
+            Some(&EditorAction::DeletePreviousWord)
+        );
+        
+        let ctrl_backspace_binding = KeyBinding::with_modifiers("backspace", Modifiers::ctrl());
+        assert_eq!(
+            keymap.get(&ctrl_backspace_binding),
+            Some(&EditorAction::DeletePreviousWord)
+        );
+        
+        let alt_delete_binding = KeyBinding::with_modifiers("delete", Modifiers::alt());
+        assert_eq!(
+            keymap.get(&alt_delete_binding),
+            Some(&EditorAction::DeleteNextWord)
+        );
+        
+        // Test line deletion shortcuts (Cmd+Backspace/Delete for macOS)
+        let cmd_backspace_binding = KeyBinding::with_modifiers("backspace", Modifiers::cmd());
+        assert_eq!(
+            keymap.get(&cmd_backspace_binding),
+            Some(&EditorAction::DeleteToLineStart)
+        );
+        
+        let cmd_delete_binding = KeyBinding::with_modifiers("delete", Modifiers::cmd());
+        assert_eq!(
+            keymap.get(&cmd_delete_binding),
+            Some(&EditorAction::DeleteToLineEnd)
+        );
+        
+        // Test current line deletion shortcut (Cmd+Shift+K for macOS, Ctrl+Shift+K for cross-platform)
+        let cmd_shift_k_binding = KeyBinding::with_modifiers("k", Modifiers::cmd_shift());
+        assert_eq!(
+            keymap.get(&cmd_shift_k_binding),
+            Some(&EditorAction::DeleteCurrentLine)
+        );
+        
+        let ctrl_shift_k_binding = KeyBinding::with_modifiers("k", Modifiers::ctrl_shift());
+        assert_eq!(
+            keymap.get(&ctrl_shift_k_binding),
+            Some(&EditorAction::DeleteCurrentLine)
         );
     }
 

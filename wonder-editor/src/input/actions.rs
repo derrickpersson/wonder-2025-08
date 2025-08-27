@@ -11,6 +11,13 @@ pub enum EditorAction {
     Backspace,
     Delete,
     
+    // Advanced deletion operations
+    DeletePreviousWord,
+    DeleteNextWord,
+    DeleteToLineStart,
+    DeleteToLineEnd,
+    DeleteCurrentLine,
+    
     // Cursor movement
     MoveCursor(Movement),
     
@@ -93,5 +100,22 @@ mod tests {
     fn test_format_type_variants() {
         assert_eq!(FormatType::Bold, FormatType::Bold);
         assert_ne!(FormatType::Bold, FormatType::Italic);
+    }
+
+    #[test]
+    fn test_advanced_deletion_actions() {
+        // Test word deletion actions
+        let delete_prev_word = EditorAction::DeletePreviousWord;
+        let delete_next_word = EditorAction::DeleteNextWord;
+        assert_ne!(delete_prev_word, delete_next_word);
+        
+        // Test line deletion actions
+        let delete_to_start = EditorAction::DeleteToLineStart;
+        let delete_to_end = EditorAction::DeleteToLineEnd;
+        assert_ne!(delete_to_start, delete_to_end);
+        
+        // Test current line deletion
+        let delete_line = EditorAction::DeleteCurrentLine;
+        assert_ne!(delete_line, delete_prev_word);
     }
 }
