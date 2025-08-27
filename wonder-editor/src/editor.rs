@@ -130,17 +130,23 @@ impl MarkdownEditor {
         // ENG-137/138: Convert mouse coordinates to character position
         let character_position = self.convert_point_to_character_index(event.position);
         
-        // ENG-139: Detect click count for double/triple-click selection
-        let now = std::time::Instant::now();
-        let click_count = self.calculate_click_count(character_position, now);
-        
-        // Handle different click types
-        self.handle_click_with_count(character_position, click_count);
-        
-        // Set flag that we're potentially starting a drag operation (only for single clicks)
-        if click_count == 1 {
-            self.is_mouse_down = true;
-            self.mouse_down_position = Some(character_position);
+        // ENG-140: Check for Shift modifier for selection extension
+        if event.modifiers.shift {
+            // Shift+click - extend selection (no drag support for Shift+click)
+            self.handle_shift_click_at_position(character_position);
+        } else {
+            // ENG-139: Detect click count for double/triple-click selection
+            let now = std::time::Instant::now();
+            let click_count = self.calculate_click_count(character_position, now);
+            
+            // Handle different click types
+            self.handle_click_with_count(character_position, click_count);
+            
+            // Set flag that we're potentially starting a drag operation (only for single clicks)
+            if click_count == 1 {
+                self.is_mouse_down = true;
+                self.mouse_down_position = Some(character_position);
+            }
         }
         
         cx.notify();
@@ -340,6 +346,23 @@ impl MarkdownEditor {
 
     fn is_word_char(&self, ch: char) -> bool {
         ch.is_alphanumeric() || ch == '_'
+    }
+
+    // ENG-140: Shift+click selection extension
+    fn handle_shift_click_at_position(&mut self, position: usize) {
+        if self.document.has_selection() {
+            // If there's an existing selection, extend it from the original start point
+            let (start, _end) = self.document.selection_range().unwrap();
+            // Clear current selection and create new one from original start to clicked position
+            self.document.clear_selection();
+            self.document.set_cursor_position(start);
+            self.document.start_selection();
+            self.document.set_cursor_position(position);
+        } else {
+            // No existing selection - create from cursor to clicked position
+            self.document.start_selection();
+            self.document.set_cursor_position(position);
+        }
     }
 
     // Key event handler for special keys that don't go through EntityInputHandler
@@ -1665,6 +1688,39 @@ mod tests {
             ch.is_alphanumeric() || ch == '_'
         }
 
+        // ENG-140: Shift+click selection extension methods
+        pub fn set_cursor_position(&mut self, position: usize) {
+            self.document.set_cursor_position(position);
+        }
+
+        pub fn start_selection(&mut self) {
+            self.document.start_selection();
+        }
+
+        pub fn selection_range(&self) -> Option<(usize, usize)> {
+            self.document.selection_range()
+        }
+
+        pub fn handle_shift_click_at_position(&mut self, position: usize) -> bool {
+            let current_cursor = self.cursor_position();
+            
+            if self.has_selection() {
+                // If there's an existing selection, extend it from the original start point
+                let (start, _end) = self.document.selection_range().unwrap();
+                // Clear current selection and create new one from original start to clicked position
+                self.document.clear_selection();
+                self.document.set_cursor_position(start);
+                self.document.start_selection();
+                self.document.set_cursor_position(position);
+            } else {
+                // No existing selection - create from cursor to clicked position
+                self.document.start_selection();
+                self.document.set_cursor_position(position);
+            }
+            
+            true
+        }
+
         // Legacy action methods removed - now using InputRouter directly
     }
 
@@ -2264,6 +2320,60 @@ mod tests {
         let result = editor.handle_click_at_position_with_click_count(23, 2); // On 'formatting'
         assert!(result, "Double click outside token should succeed");
         assert_eq!(editor.selected_text(), Some("formatting".to_string()), "Should select word outside token");
+    }
+
+    // ENG-140: Shift+click selection extension tests
+    #[test]
+    fn test_shift_click_selection_extension_from_cursor() {
+        // RED: This test should fail because we haven't implemented Shift+click yet
+        let mut editor = new_with_content("Hello world test content".to_string());
+        
+        // Position cursor at position 6 ('w' in 'world')
+        editor.set_cursor_position(6);
+        assert_eq!(editor.cursor_position(), 6, "Cursor should be at position 6");
+        assert!(!editor.has_selection(), "Should start with no selection");
+        
+        // Shift+click at position 12 ('t' in 'test') to create selection
+        let result = editor.handle_shift_click_at_position(12);
+        assert!(result, "Shift+click should succeed");
+        assert!(editor.has_selection(), "Shift+click should create selection");
+        assert_eq!(editor.selected_text(), Some("world ".to_string()), "Should select from cursor to click position");
+        assert_eq!(editor.selection_range(), Some((6, 12)), "Selection range should be from 6 to 12");
+    }
+
+    #[test] 
+    fn test_shift_click_extends_existing_selection() {
+        // RED: Test extending an existing selection with Shift+click
+        let mut editor = new_with_content("The quick brown fox jumps".to_string());
+        
+        // Create initial selection of 'quick' (positions 4-9)
+        editor.set_cursor_position(4);
+        editor.start_selection();
+        editor.set_cursor_position(9);
+        assert_eq!(editor.selected_text(), Some("quick".to_string()), "Initial selection should be 'quick'");
+        
+        // Shift+click at position 15 ('brown') to extend selection
+        let result = editor.handle_shift_click_at_position(15);
+        assert!(result, "Shift+click extend should succeed");
+        assert_eq!(editor.selected_text(), Some("quick brown".to_string()), "Should extend selection to include 'brown'");
+        assert_eq!(editor.selection_range(), Some((4, 15)), "Extended selection range should be from 4 to 15");
+    }
+
+    #[test]
+    fn test_shift_click_backwards_selection() {
+        // RED: Test Shift+click extending selection backwards
+        let mut editor = new_with_content("The quick brown fox jumps".to_string());
+        
+        // Position cursor at position 15 ('b' in 'brown')
+        editor.set_cursor_position(15);
+        assert_eq!(editor.cursor_position(), 15, "Cursor should be at position 15");
+        
+        // Shift+click at position 4 ('q' in 'quick') to create backward selection
+        let result = editor.handle_shift_click_at_position(4);
+        assert!(result, "Backward Shift+click should succeed");
+        assert!(editor.has_selection(), "Should create backward selection");
+        assert_eq!(editor.selected_text(), Some("quick brown".to_string()), "Should select backward from cursor");
+        assert_eq!(editor.selection_range(), Some((4, 15)), "Selection should be properly ordered");
     }
 
     // ENG-137: Basic click-to-position cursor functionality tests
