@@ -115,51 +115,185 @@ cargo fmt
 
 # Lint code
 cargo clippy
+
+# Run performance benchmarks
+cargo run --bin benchmark
+
+# Quick performance validation
+cargo run --bin benchmark -- --quick
 ```
+
+## Performance Testing Standards - MANDATORY ⚡
+
+### Performance Requirements (ENG-148 Validated)
+**ALL features must meet these performance standards:**
+
+- ✅ **<10ms response time** for any single edit operation
+- ✅ **<10ms response time** for any cursor/selection operation  
+- ✅ **No UI freezing** during any operation (including 10MB+ documents)
+- ✅ **Minimum throughput targets**:
+  - Cursor positioning: >1M ops/sec
+  - Character insertion: >250 ops/sec (10MB docs), >100K ops/sec (1KB docs)
+  - Word navigation: >25K ops/sec
+  - Selection operations: >250 ops/sec (10MB docs)
+
+### Performance Testing Workflow - MANDATORY
+**BEFORE every feature commit:**
+
+1. **🔴 RED Phase - Performance Test First:**
+   ```rust
+   #[test] 
+   fn test_new_feature_performance_large_document() {
+       let mut doc = create_large_test_document(1024 * 1024); // 1MB
+       let start = std::time::Instant::now();
+       
+       // Execute new feature operation
+       doc.your_new_feature();
+       
+       let duration = start.elapsed();
+       assert!(duration.as_millis() < 10, "Operation took {}ms, exceeds 10ms limit", duration.as_millis());
+   }
+   ```
+
+2. **🟢 GREEN Phase - Meet Performance Target:**
+   - Implement feature to pass performance test
+   - Use O(log n) algorithms where possible (Rope benefits)
+   - Avoid full document scans
+
+3. **🔵 REFACTOR Phase - Optimize:**
+   - Profile with `cargo run --bin benchmark` if needed
+   - Apply Rope-specific optimizations
+   - Maintain performance targets
+
+### Performance Regression Prevention
+**MANDATORY checks before ANY commit:**
+
+```bash
+# 1. Run full benchmark suite (must complete in <30 seconds)
+cargo run --bin benchmark
+
+# 2. Verify all operations under 10ms target
+# Look for "✅ Within 10ms performance target" messages
+
+# 3. Run all tests (performance tests included)
+cargo test
+
+# 4. If ANY performance regression found:
+#    - STOP development
+#    - Fix performance issue FIRST
+#    - Re-run benchmarks to verify fix
+#    - THEN commit
+```
+
+### Performance Testing Commands
+```bash
+# Quick validation (during development)
+cargo run --bin benchmark -- --quick
+
+# Comprehensive benchmark (before commits)
+cargo run --bin benchmark
+
+# Performance regression testing
+cargo run --bin benchmark > current_results.txt
+# Compare with baseline performance
+
+# Profile specific operations
+cargo test test_cursor_performance_on_large_document -- --nocapture
+```
+
+### Current Performance Baseline (ENG-148)
+**These are MINIMUM acceptable performance levels:**
+
+| Operation | 1KB | 100KB | 1MB | 10MB | Target |
+|-----------|-----|-------|-----|------|--------|
+| Cursor positioning | 6M ops/sec | 6.6M ops/sec | 8M ops/sec | 8.4M ops/sec | >1M ops/sec ✅ |
+| Single char insert | 130K ops/sec | 34K ops/sec | 4K ops/sec | 293 ops/sec | >250 ops/sec ✅ |
+| Word navigation | 127K ops/sec | 32K ops/sec | 38K ops/sec | 50K ops/sec | >25K ops/sec ✅ |
+| Selection operations | 665K ops/sec | 50K ops/sec | 4K ops/sec | 264 ops/sec | >250 ops/sec ✅ |
+| **Worst case latency** | 0.1ms | 0.1ms | 0.3ms | **4.3ms** | **<10ms** ✅ |
+
+### Performance Testing Guidelines
+
+**🚨 IMMEDIATE STOP CONDITIONS:**
+- Any operation takes >10ms on documents ≤10MB
+- Throughput drops below minimum targets
+- UI becomes unresponsive during any operation
+- Full benchmark suite takes >60 seconds to complete
+
+**⚡ Performance Optimization Priorities:**
+1. **Cursor/Selection**: Must be instant (<1ms typical)
+2. **Text Editing**: Must be responsive (<5ms typical)  
+3. **Rendering**: Must not block UI (<16ms frame budget)
+4. **Large Documents**: Must remain usable (10MB+ documents)
+
+**🔧 Performance Debugging Tools:**
+- `cargo run --bin benchmark` - Comprehensive performance analysis
+- `cargo test test_cursor_performance_on_large_document` - Specific operation testing
+- Built-in benchmark analysis with throughput metrics
+- Rope-specific performance characteristics validation
+
+### Performance Review Checklist
+Before any commit, verify:
+
+- [ ] All benchmark tests pass with current performance standards
+- [ ] No operation exceeds 10ms response time limit
+- [ ] Throughput meets minimum targets across all document sizes
+- [ ] UI remains responsive during all operations
+- [ ] Performance baseline maintained or improved
+- [ ] Any performance-critical code includes performance tests
 
 ## Project Structure - Clean Architecture
 ```
 wonder-editor/
 ├── src/
 │   ├── main.rs              # Application entry point
+│   ├── lib.rs               # Library crate root for benchmarks
 │   ├── app.rs               # Main application component (GPUI UI)
 │   ├── editor.rs            # UI layer - Hybrid markdown editor component
+│   ├── benchmarks.rs        # ⚡ Performance benchmark suite (ENG-148)
+│   ├── bin/
+│   │   └── benchmark.rs     # 📊 Benchmark runner binary
 │   ├── core/                # 📦 Domain layer (business logic)
 │   │   ├── mod.rs           # Core module exports (TextDocument only)
 │   │   ├── cursor.rs        # Cursor position management
 │   │   ├── selection.rs     # Text selection state management
-│   │   └── text_document.rs # Core text operations & selection logic
+│   │   └── text_document.rs # 🚀 Rope-based text operations & selection (O(log n))
 │   ├── input/               # 📦 Input layer (user interactions)
 │   │   ├── mod.rs           # Input module exports
 │   │   ├── input_event.rs   # Input event types & special keys
 │   │   ├── commands.rs      # Command pattern for text operations
 │   │   └── keyboard_handler.rs # Input processing & command dispatch
-│   ├── hybrid_renderer.rs   # 🎨 Hybrid preview/raw mode rendering
+│   ├── hybrid_renderer.rs   # 🎨 Hybrid preview/raw mode rendering (Rope optimized)
 │   └── markdown_parser.rs   # 📝 Markdown token parsing & positioning
-├── Cargo.toml               # Dependencies and project metadata
+├── Cargo.toml               # Dependencies and project metadata (includes ropey)
 └── CLAUDE.md                # This file - project conventions
 ```
 
 ### Architecture Layers (SOLID Compliant)
 1. **UI Layer** (`editor.rs`, `app.rs`) - Pure UI components, GPUI rendering
 2. **Input Layer** (`input/`) - Handles user interactions, converts to commands
-3. **Domain Layer** (`core/`) - Business logic, text operations, core abstractions
-4. **Rendering Layer** (`hybrid_renderer.rs`) - Preview/raw mode switching logic
+3. **Domain Layer** (`core/`) - Business logic, rope-based text operations, core abstractions
+4. **Rendering Layer** (`hybrid_renderer.rs`) - Preview/raw mode switching logic (rope optimized)
 5. **Parsing Layer** (`markdown_parser.rs`) - Markdown tokenization with positions
-6. **Infrastructure** - GPUI framework, external dependencies
+6. **Performance Layer** (`benchmarks.rs`, `bin/benchmark.rs`) - Performance testing & validation
+7. **Infrastructure** - GPUI framework, ropey, external dependencies
 
 ## Current Features & Components
 
 ### Core Features ✅
 - **Hybrid Rendering**: Real-time switching between preview and raw markdown based on cursor position
 - **Text Selection**: Full selection support with Shift+arrow keys and visual highlighting
+- **Rope-based Text Operations**: O(log n) performance for large documents (ENG-144 to ENG-147)
+- **Performance Benchmarking**: Comprehensive performance testing infrastructure (ENG-148)
 - **Markdown Parsing**: Supports headings, bold, italic, code, links, lists, blockquotes
 - **GPUI Integration**: Custom text rendering with mixed font styles and highlighting
 - **Command System**: Extensible command pattern for all text operations
+- **Zero-copy Rendering**: Efficient RopeSlice integration for optimal memory usage
 
-### Core Components (All Test-Driven - 81 Tests)
-- **TextDocument** (18 tests) - Main text operations, cursor management, selection
-- **HybridTextRenderer** (9 tests) - Preview/raw mode switching logic
+### Core Components (All Test-Driven - 154 Tests)
+- **TextDocument** (21 tests) - Rope-based text operations, cursor management, selection (O(log n))
+- **PerformanceBenchmark** (4 tests) - Performance testing infrastructure and validation (ENG-148)
+- **HybridTextRenderer** (9 tests) - Preview/raw mode switching logic (rope optimized)
 - **KeyboardHandler** (5 tests) - Input event processing
 - **EditorCommand** (13 tests) - Command pattern for operations including selection
 - **MarkdownParser** (13 tests) - Markdown tokenization with positioning
@@ -167,6 +301,7 @@ wonder-editor/
 - **Selection** (4 tests) - Selection state management
 - **InputEvent** (2 tests) - Input event types
 - **Editor Integration** (12 tests) - UI layer behavior and selection highlighting
+- **Application** (1 test) - Main application component testing
 
 ## Linear Integration & Workflow
 
@@ -225,11 +360,13 @@ For each subtask, ensure:
 6. **Make it pass minimally** (GREEN phase)
 7. **Refactor while tests are green** (REFACTOR phase)
 8. **FOR INPUT/KEYBOARD FEATURES**: Follow INTEGRATION_CHECKLIST.md COMPLETELY
-9. **Repeat TDD cycle** for next behavior
-10. **Update Linear** with progress comments and any blockers discovered
-11. **Mark ticket complete** in Linear only when all tests pass
-12. **COMMIT CHANGES** immediately after task completion (NEW RULE)
-13. **Move to next priority task** and repeat TDD process
+9. **PERFORMANCE VALIDATION** - Run `cargo run --bin benchmark -- --quick` during development
+10. **Repeat TDD cycle** for next behavior
+11. **Update Linear** with progress comments and any blockers discovered
+12. **PRE-COMMIT PERFORMANCE CHECK** - Run `cargo run --bin benchmark` (must pass)
+13. **Mark ticket complete** in Linear only when all tests pass AND performance targets met
+14. **COMMIT CHANGES** immediately after task completion (NEW RULE)
+15. **Move to next priority task** and repeat TDD process
 
 ### AUTO-COMMIT RULE - NEW REQUIREMENT ⚡
 **MANDATORY**: After completing ANY task (Linear ticket, bug fix, feature implementation, or cleanup):
@@ -252,7 +389,10 @@ This ensures:
 - Making a test pass by changing the test → STOP immediately  
 - Skipping any of the 3 TDD phases → STOP immediately
 - Writing multiple behaviors in one test → STOP immediately
-- Completing a task without committing → STOP immediately (NEW)
+- Completing a task without committing → STOP immediately
+- Committing without running performance benchmark → STOP immediately (NEW)
+- Any operation taking >10ms → STOP immediately (NEW)
+- Performance regression detected → STOP immediately (NEW)
 
 ### Checking Linear for Next Task
 Use the Linear MCP server to:
@@ -348,6 +488,7 @@ cargo build --release
 
 ## Dependencies
 - **gpui**: UI framework from Zed for high-performance text editing
+- **ropey**: High-performance rope data structure for text editing (O(log n) operations)
 - **anyhow**: Error handling
 - **serde**: Serialization/deserialization
 - **pulldown-cmark**: Markdown parsing with positioning support
@@ -355,48 +496,59 @@ cargo build --release
 
 ## Test Coverage Requirements
 - **All new code MUST be test-driven (TDD)**
-- **Current: 94 tests across all components** (updated)
+- **Current: 154 tests across all components** (updated after ENG-148)
 - **Minimum 90% test coverage for core components**
+- **Performance tests for all new features** (MANDATORY)
 - **Integration tests for UI components**
 - **No untested code in core/ or input/ layers**
 - **MANDATORY: Full integration tests for input features (see INTEGRATION_CHECKLIST.md)**
+- **MANDATORY: Performance benchmarking before every commit**
 
 ### Testing Architecture Layers
 1. **Unit Tests**: Core domain logic (cursor, selection, text operations)
-2. **Integration Tests**: Input handling and command execution  
-3. **Component Tests**: UI layer behavior and rendering
-4. **Selection Tests**: Visual highlighting and interaction behavior
-5. **End-to-End Tests**: Full user interaction flows (future)
+2. **Performance Tests**: Benchmark suite validating <10ms response times (ENG-148)
+3. **Integration Tests**: Input handling and command execution  
+4. **Component Tests**: UI layer behavior and rendering
+5. **Selection Tests**: Visual highlighting and interaction behavior
+6. **Rope Tests**: O(log n) algorithm correctness and performance
+7. **End-to-End Tests**: Full user interaction flows (future)
 
 ## Codebase Health Status ✅
 
-### Recently Cleaned (2024)
-- **Removed Legacy Components**: text_buffer.rs, preview_renderer.rs, mode_manager.rs (~1,433 lines)
-- **Updated Module Structure**: Clean exports, removed dead imports
-- **Fixed Compilation Warnings**: From 31 warnings to 12 (only future-functionality warnings remain)
-- **Maintained Test Coverage**: 81/81 tests passing (100%)
-- **Architecture**: Clean separation maintained across all layers
+### Recently Completed (2025) - Rope Migration Success
+- **Rope Migration Complete**: String → Rope data structure (ENG-144 to ENG-148)
+- **Performance Optimizations**: O(n) → O(log n) for all text operations
+- **Zero-copy Rendering**: RopeSlice integration with hybrid renderer
+- **Comprehensive Benchmarking**: 28 performance operations validated <10ms
+- **Architecture Enhanced**: Added performance testing layer
+- **Test Coverage Increased**: 150 → 154 tests (100% passing)
 
-### Current Quality Metrics
-- **Tests**: 81 tests, 100% passing
-- **Compilation**: Clean with no errors
-- **Warnings**: 12 (only related to future functionality, not dead code)
-- **Architecture**: SOLID principles maintained throughout
-- **Features**: Hybrid rendering and visual selection highlighting fully operational
+### Current Quality Metrics  
+- **Tests**: 154 tests, 100% passing ✅
+- **Performance**: All operations <10ms (8.4M ops/sec peak) ✅  
+- **Compilation**: Clean with no errors ✅
+- **Warnings**: 12 (only related to future functionality, not dead code) ✅
+- **Architecture**: SOLID principles + performance layer ✅
+- **Features**: Rope-optimized hybrid rendering and selection highlighting ✅
+- **Scalability**: Handles 10MB+ documents with <5ms response time ✅
 
 ## Future Development Priorities
 As the project grows, we will add:
+- **Collaborative editing capabilities** (ENG-149 - CRDTs with rope foundation)
 - Multi-line selection highlighting support
 - Advanced markdown features (tables, footnotes, task lists)
 - Plugin system for custom markdown extensions
-- Performance optimizations for large documents
-- Collaborative editing capabilities
+- Real-time collaborative synchronization
 - Advanced keyboard shortcuts and vim-style navigation
+- Performance profiling and optimization tools
 
 ## Code Review Standards
 - All code must pass TDD cycle review
 - No code without comprehensive tests
+- **All new features must pass performance benchmarks** (NEW)
+- **<10ms response time requirement** for all operations (NEW)
 - Clear, descriptive naming throughout
 - SOLID principles applied consistently
-- Performance considerations documented
+- Rope-optimized algorithms preferred (O(log n) vs O(n))
+- Performance considerations documented and tested
 - Security best practices followed (no secrets in code)
