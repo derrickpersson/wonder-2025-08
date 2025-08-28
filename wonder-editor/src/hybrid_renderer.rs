@@ -615,20 +615,23 @@ impl HybridTextRenderer {
                                 // Map to inside the **content** part
                                 // Bold token structure: "**content**"
                                 // We want to map display position within content to original position within content
-                                return token.start + 2 + offset_in_display;
+                                let marker_len = 2; // "**" at start
+                                return token.start + marker_len + original_offset.min(display_token_len);
                             }
                             MarkdownToken::Italic(_) => {
                                 // Map to inside the *content* part  
-                                return token.start + 1 + original_offset.min(original_token_len.saturating_sub(2));
+                                let marker_len = 1; // "*" at start
+                                return token.start + marker_len + original_offset.min(display_token_len);
                             }
                             MarkdownToken::Code(_) => {
                                 // Map to inside the `content` part
-                                return token.start + 1 + original_offset.min(original_token_len.saturating_sub(2));
+                                let marker_len = 1; // "`" at start
+                                return token.start + marker_len + original_offset.min(display_token_len);
                             }
                             MarkdownToken::Heading(level, _) => {
                                 // Map to inside the heading content (after "# " or "## ", etc.)
                                 let prefix_len = *level as usize + 1; // "# " = 2, "## " = 3, etc.
-                                return token.start + prefix_len + offset_in_display;
+                                return token.start + prefix_len + original_offset.min(display_token_len);
                             }
                             _ => {
                                 return token.start + original_offset.min(original_token_len);
