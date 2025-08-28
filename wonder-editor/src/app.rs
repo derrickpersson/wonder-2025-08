@@ -14,6 +14,12 @@ impl WonderApp {
         
         Self { editor }
     }
+    
+    pub fn new_with_content(content: String, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(|cx| MarkdownEditor::new_with_content(content, cx));
+        
+        Self { editor }
+    }
 }
 
 impl Render for WonderApp {
