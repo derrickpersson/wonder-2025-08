@@ -299,9 +299,8 @@ impl TextDocument {
 
     pub fn move_cursor_down(&mut self) {
         let (line_index, column) = self.get_cursor_line_and_column();
-        let content_string = self.content.to_string();
-        let lines: Vec<&str> = content_string.lines().collect();
-        if line_index + 1 < lines.len() {
+        // Use efficient Ropey method to check if next line exists
+        if line_index + 1 < self.content.len_lines() {
             let new_position = self.get_position_from_line_and_column(line_index + 1, column);
             self.set_cursor_position(new_position);
         } else {
@@ -318,11 +317,19 @@ impl TextDocument {
 
     pub fn move_to_line_end(&mut self) {
         let (line_index, _) = self.get_cursor_line_and_column();
-        let content_string = self.content.to_string();
-        let lines: Vec<&str> = content_string.lines().collect();
-        let line_length = lines.get(line_index).map(|line| line.chars().count()).unwrap_or(0);
-        let position = self.get_position_from_line_and_column(line_index, line_length);
-        self.set_cursor_position(position);
+        // Use efficient Ropey method to get line length
+        if line_index < self.content.len_lines() {
+            let line_slice = self.content.line(line_index);
+            let line_len = line_slice.len_chars();
+            // Don't include newline in positioning
+            let line_content_len = if line_len > 0 && line_slice.char(line_len - 1) == '\n' {
+                line_len - 1
+            } else {
+                line_len
+            };
+            let position = self.get_position_from_line_and_column(line_index, line_content_len);
+            self.set_cursor_position(position);
+        }
     }
 
     pub fn move_to_document_start(&mut self) {
@@ -431,23 +438,19 @@ impl TextDocument {
 
     // Helper methods for word boundary detection
     fn find_word_start(&self, position: usize) -> usize {
-        let chars: Vec<char> = self.content.to_string().chars().collect();
-        
         // If at start of document, stay there
         if position == 0 {
             return 0;
         }
         
         let mut pos = position;
+        let max_pos = self.content.len_chars();
         
         // First, skip back over any non-word characters if we're on them
         while pos > 0 {
-            if let Some(ch) = chars.get(pos - 1) {
-                if !ch.is_alphabetic() && !ch.is_numeric() {
-                    pos -= 1;
-                } else {
-                    break;
-                }
+            let ch = self.content.char(pos - 1);
+            if !ch.is_alphabetic() && !ch.is_numeric() {
+                pos -= 1;
             } else {
                 break;
             }
@@ -455,12 +458,9 @@ impl TextDocument {
         
         // Then, move back to the start of the word
         while pos > 0 {
-            if let Some(ch) = chars.get(pos - 1) {
-                if ch.is_alphabetic() || ch.is_numeric() {
-                    pos -= 1;
-                } else {
-                    break;
-                }
+            let ch = self.content.char(pos - 1);
+            if ch.is_alphabetic() || ch.is_numeric() {
+                pos -= 1;
             } else {
                 break;
             }
@@ -470,8 +470,7 @@ impl TextDocument {
     }
     
     fn find_word_end(&self, position: usize) -> usize {
-        let chars: Vec<char> = self.content.to_string().chars().collect();
-        let max_position = chars.len();
+        let max_position = self.content.len_chars();
         
         // If at end of document, stay there
         if position >= max_position {
@@ -482,12 +481,9 @@ impl TextDocument {
         
         // First, skip forward over any non-word characters if we're on them
         while pos < max_position {
-            if let Some(ch) = chars.get(pos) {
-                if !ch.is_alphabetic() && !ch.is_numeric() {
-                    pos += 1;
-                } else {
-                    break;
-                }
+            let ch = self.content.char(pos);
+            if !ch.is_alphabetic() && !ch.is_numeric() {
+                pos += 1;
             } else {
                 break;
             }
@@ -495,12 +491,9 @@ impl TextDocument {
         
         // Then, move forward to the end of the word
         while pos < max_position {
-            if let Some(ch) = chars.get(pos) {
-                if ch.is_alphabetic() || ch.is_numeric() {
-                    pos += 1;
-                } else {
-                    break;
-                }
+            let ch = self.content.char(pos);
+            if ch.is_alphabetic() || ch.is_numeric() {
+                pos += 1;
             } else {
                 break;
             }
@@ -512,30 +505,30 @@ impl TextDocument {
     // Helper methods for line/column calculations
     fn get_cursor_line_and_column(&self) -> (usize, usize) {
         let char_position = self.cursor.position();
-        let chars: Vec<char> = self.content.to_string().chars().collect();
-        let content_up_to_cursor: String = chars.iter().take(char_position).collect();
-        let line_index = content_up_to_cursor.matches('\n').count();
-        let column = content_up_to_cursor
-            .lines()
-            .last()
-            .map(|line| line.chars().count())
-            .unwrap_or(char_position);
+        // Use efficient Ropey method O(log n) vs O(n)
+        let line_index = self.content.char_to_line(char_position);
+        let line_start_char = self.content.line_to_char(line_index);
+        let column = char_position - line_start_char;
         (line_index, column)
     }
 
     fn get_position_from_line_and_column(&self, line_index: usize, column: usize) -> usize {
-        let content_string = self.content.to_string();
-        let lines: Vec<&str> = content_string.lines().collect();
-        let mut position = 0;
-        
-        for (i, line) in lines.iter().enumerate() {
-            if i == line_index {
-                position += column.min(line.chars().count());
-                break;
-            }
-            position += line.chars().count() + 1; // +1 for newline
+        // Use efficient Ropey methods O(log n) vs O(n)
+        if line_index >= self.content.len_lines() {
+            return self.content.len_chars();
         }
         
+        let line_start_char = self.content.line_to_char(line_index);
+        let line_slice = self.content.line(line_index);
+        let line_len = line_slice.len_chars();
+        // Don't include newline in line length for positioning
+        let line_content_len = if line_slice.char(line_len.saturating_sub(1)) == '\n' {
+            line_len.saturating_sub(1)
+        } else {
+            line_len
+        };
+        
+        let position = line_start_char + column.min(line_content_len);
         position.min(self.content.len_chars())
     }
 
@@ -1598,5 +1591,83 @@ mod tests {
         assert_eq!(rope_doc.content(), "Hello !");
         assert_eq!(rope_doc.cursor_position(), 7);
         assert!(!rope_doc.has_selection());
+    }
+
+    // Performance test for rope-optimized cursor operations (ENG-146)
+    #[test]
+    fn test_cursor_performance_on_large_document() {
+        // Create a large document (1000 lines)
+        let mut content = String::new();
+        for i in 0..1000 {
+            content.push_str(&format!("This is line number {} with some sample text.\n", i));
+        }
+        
+        let mut doc = TextDocument::with_content(content);
+        
+        // Test cursor operations on large document should be fast (O(log n))
+        // Move to middle of document
+        doc.set_cursor_position(25000);
+        
+        // Test line-based operations that should benefit from rope optimization
+        doc.move_cursor_down();
+        doc.move_cursor_up();
+        doc.move_to_line_start();
+        doc.move_to_line_end();
+        
+        // Test word navigation
+        doc.move_to_word_start();
+        doc.move_to_word_end();
+        
+        // Test selection operations
+        doc.extend_selection_right();
+        doc.extend_selection_left();
+        
+        // All operations should complete quickly without performance degradation
+        assert!(doc.cursor_position() < doc.content.len_chars());
+    }
+
+    #[test]
+    fn test_line_column_conversion_accuracy() {
+        let content = "First line\nSecond line has more text\nThird\n\nFifth line";
+        let mut doc = TextDocument::with_content(content.to_string());
+        
+        // Content: "First line\nSecond line has more text\nThird\n\nFifth line"
+        //           0123456789012345678901234567890123456789012345678901
+        //                     ^10         ^20         ^30         ^40
+        
+        // Test various positions
+        doc.set_cursor_position(0);  // Start of first line
+        assert_eq!(doc.get_cursor_line_and_column(), (0, 0));
+        
+        doc.set_cursor_position(5);  // Middle of first line  
+        assert_eq!(doc.get_cursor_line_and_column(), (0, 5));
+        
+        doc.set_cursor_position(10); // End of first line
+        assert_eq!(doc.get_cursor_line_and_column(), (0, 10));
+        
+        doc.set_cursor_position(11); // Start of second line (after \n)
+        assert_eq!(doc.get_cursor_line_and_column(), (1, 0));
+        
+        doc.set_cursor_position(20); // Middle of second line
+        assert_eq!(doc.get_cursor_line_and_column(), (1, 9));
+        
+        doc.set_cursor_position(35); // End of second line
+        assert_eq!(doc.get_cursor_line_and_column(), (1, 24));
+        
+        // Position 36 is the newline character at end of second line
+        doc.set_cursor_position(36); // Newline at end of second line
+        assert_eq!(doc.get_cursor_line_and_column(), (1, 25)); // Still line 1, position 25
+        
+        doc.set_cursor_position(37); // Start of third line (after \n) 
+        assert_eq!(doc.get_cursor_line_and_column(), (2, 0));
+        
+        doc.set_cursor_position(42); // Newline after "Third"
+        assert_eq!(doc.get_cursor_line_and_column(), (2, 5)); // Line 2, at the newline
+        
+        doc.set_cursor_position(43); // Empty line (the second \n)
+        assert_eq!(doc.get_cursor_line_and_column(), (3, 0)); // Line 3, column 0
+        
+        doc.set_cursor_position(44); // Start of "Fifth line"
+        assert_eq!(doc.get_cursor_line_and_column(), (4, 0)); // Line 4, column 0
     }
 }
