@@ -4,6 +4,7 @@ mod markdown_parser;
 mod hybrid_renderer;
 mod core;
 mod input;
+mod benchmarks;
 
 use gpui::*;
 
