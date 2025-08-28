@@ -1,6 +1,77 @@
 use std::ops::Range;
 use crate::markdown_parser::{ParsedToken, MarkdownParser, MarkdownToken};
 use gpui::{TextRun, rgb, Font, FontFeatures, FontWeight, FontStyle};
+use ropey::RopeSlice;
+
+/// Trait for text content that can be efficiently processed by the hybrid renderer
+pub trait TextContent {
+    fn text_len(&self) -> usize;
+    fn text_is_empty(&self) -> bool;
+    fn text_slice(&self, range: Range<usize>) -> String;
+    fn text_to_string(&self) -> String;
+    fn char_at(&self, index: usize) -> Option<char>;
+    fn chars_count(&self) -> usize;
+}
+
+impl TextContent for &str {
+    fn text_len(&self) -> usize {
+        self.chars().count()
+    }
+    
+    fn text_is_empty(&self) -> bool {
+        str::is_empty(self)
+    }
+    
+    fn text_slice(&self, range: Range<usize>) -> String {
+        self.chars().skip(range.start).take(range.end - range.start).collect()
+    }
+    
+    fn text_to_string(&self) -> String {
+        (*self).to_string()
+    }
+    
+    fn char_at(&self, index: usize) -> Option<char> {
+        self.chars().nth(index)
+    }
+    
+    fn chars_count(&self) -> usize {
+        self.chars().count()
+    }
+}
+
+impl TextContent for RopeSlice<'_> {
+    fn text_len(&self) -> usize {
+        self.len_chars()
+    }
+    
+    fn text_is_empty(&self) -> bool {
+        self.len_chars() == 0
+    }
+    
+    fn text_slice(&self, range: Range<usize>) -> String {
+        if range.end <= self.len_chars() {
+            self.slice(range.start..range.end).to_string()
+        } else {
+            self.slice(range.start..).to_string()
+        }
+    }
+    
+    fn text_to_string(&self) -> String {
+        self.to_string()
+    }
+    
+    fn char_at(&self, index: usize) -> Option<char> {
+        if index < self.len_chars() {
+            Some(self.char(index))
+        } else {
+            None
+        }
+    }
+    
+    fn chars_count(&self) -> usize {
+        self.len_chars()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct StyledTextSegment {
@@ -59,12 +130,13 @@ impl HybridTextRenderer {
         }
     }
     
-    pub fn generate_styled_text_segments(&self, content: &str, cursor_position: usize, selection: Option<Range<usize>>) -> Vec<StyledTextSegment> {
-        if content.is_empty() {
+    pub fn generate_styled_text_segments<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>) -> Vec<StyledTextSegment> {
+        if content.text_is_empty() {
             return vec![];
         }
         
-        let token_modes = self.render_document(content, cursor_position, selection.clone());
+        let content_str = content.text_to_string();
+        let token_modes = self.render_document(&content_str, cursor_position, selection.clone());
         let mut segments = Vec::new();
         let mut current_pos = 0;
         
@@ -75,7 +147,7 @@ impl HybridTextRenderer {
         for (token, mode) in sorted_tokens {
             // Add any text before this token
             if token.start > current_pos {
-                let before_text = &content[current_pos..token.start];
+                let before_text = &content_str[current_pos..token.start];
                 segments.push(StyledTextSegment {
                     text: before_text.to_string(),
                     text_run: TextRun {
@@ -100,7 +172,7 @@ impl HybridTextRenderer {
             let (display_text, font_weight, font_style, color, font_family, font_size) = match mode {
                 TokenRenderMode::Raw => {
                     // Raw mode: show original markdown syntax
-                    let original_text = &content[token.start..token.end];
+                    let original_text = &content_str[token.start..token.end];
                     (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x94a3b8), "SF Pro", self.get_font_size_for_regular_text())
                 }
                 TokenRenderMode::Preview => {
@@ -120,7 +192,7 @@ impl HybridTextRenderer {
                         }
                         _ => {
                             // For other tokens, show original text
-                            let original_text = &content[token.start..token.end];
+                            let original_text = &content_str[token.start..token.end];
                             (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_regular_text())
                         }
                     }
@@ -150,8 +222,8 @@ impl HybridTextRenderer {
         }
         
         // Add any remaining text after the last token
-        if current_pos < content.len() {
-            let remaining_text = &content[current_pos..];
+        if current_pos < content_str.len() {
+            let remaining_text = &content_str[current_pos..];
             segments.push(StyledTextSegment {
                 text: remaining_text.to_string(),
                 text_run: TextRun {
@@ -201,42 +273,45 @@ impl HybridTextRenderer {
             .collect()
     }
     
-    pub fn generate_mixed_text_runs(&self, content: &str, cursor_position: usize, selection: Option<Range<usize>>) -> Vec<TextRun> {
-        if content.is_empty() {
+    pub fn generate_mixed_text_runs<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>) -> Vec<TextRun> {
+        if content.text_is_empty() {
             return vec![];
         }
         
-        let token_modes = self.render_document(content, cursor_position, selection.clone());
+        let content_str = content.text_to_string();
+        let token_modes = self.render_document(&content_str, cursor_position, selection.clone());
         
         // Build the transformed content and corresponding TextRuns
-        let (_transformed_content, mut text_runs) = self.build_transformed_content_with_proper_runs(content, &token_modes);
+        let (_transformed_content, mut text_runs) = self.build_transformed_content_with_proper_runs(&content_str, &token_modes);
         
         // Apply selection highlighting if there's a selection  
         if let Some(sel) = selection {
-            text_runs = self.apply_selection_highlighting_to_transformed(text_runs, content, sel, &token_modes);
+            text_runs = self.apply_selection_highlighting_to_transformed(text_runs, &content_str, sel, &token_modes);
         }
         
         text_runs
     }
     
     /// Returns the transformed content string that should be displayed
-    pub fn get_display_content(&self, content: &str, cursor_position: usize, selection: Option<Range<usize>>) -> String {
-        if content.is_empty() {
+    pub fn get_display_content<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>) -> String {
+        if content.text_is_empty() {
             return String::new();
         }
         
-        let token_modes = self.render_document(content, cursor_position, selection);
-        let (transformed_content, _) = self.build_transformed_content_with_proper_runs(content, &token_modes);
+        let content_str = content.text_to_string();
+        let token_modes = self.render_document(&content_str, cursor_position, selection);
+        let (transformed_content, _) = self.build_transformed_content_with_proper_runs(&content_str, &token_modes);
         transformed_content
     }
     
     /// Maps a cursor position from original content to transformed content
-    pub fn map_cursor_position(&self, content: &str, original_cursor_pos: usize, selection: Option<Range<usize>>) -> usize {
-        if content.is_empty() || original_cursor_pos == 0 {
+    pub fn map_cursor_position<T: TextContent>(&self, content: T, original_cursor_pos: usize, selection: Option<Range<usize>>) -> usize {
+        if content.text_is_empty() || original_cursor_pos == 0 {
             return 0;
         }
         
-        let token_modes = self.render_document(content, original_cursor_pos, selection);
+        let content_str = content.text_to_string();
+        let token_modes = self.render_document(&content_str, original_cursor_pos, selection);
         let mut transformed_pos = 0;
         let mut original_pos = 0;
         
@@ -452,18 +527,19 @@ impl HybridTextRenderer {
     }
     
     // ENG-141: Coordinate mapping between display positions and original content positions
-    pub fn map_display_position_to_original(&self, content: &str, display_position: usize, cursor_position: usize, selection: Option<(usize, usize)>) -> usize {
-        if content.is_empty() {
+    pub fn map_display_position_to_original<T: TextContent>(&self, content: T, display_position: usize, cursor_position: usize, selection: Option<(usize, usize)>) -> usize {
+        if content.text_is_empty() {
             return 0;
         }
         
+        let content_str = content.text_to_string();
         // Get the tokens and their render modes for the current state
         let selection_range = selection.map(|(start, end)| start..end);
-        let token_modes = self.render_document(content, cursor_position, selection_range);
+        let token_modes = self.render_document(&content_str, cursor_position, selection_range);
         
         // If no tokens, display position maps directly to original position
         if token_modes.is_empty() {
-            return display_position.min(content.chars().count());
+            return display_position.min(content.chars_count());
         }
         
         let mut display_pos = 0;
@@ -476,7 +552,7 @@ impl HybridTextRenderer {
         for (token, mode) in sorted_tokens {
             // Add any text before this token
             if token.start > original_pos {
-                let before_text = &content[original_pos..token.start];
+                let before_text = &content_str[original_pos..token.start];
                 let before_len = before_text.chars().count();
                 
                 // Check if display position falls in this before-token text
@@ -493,12 +569,12 @@ impl HybridTextRenderer {
             let (display_text, original_text) = match mode {
                 TokenRenderMode::Raw => {
                     // Raw mode: display text is same as original
-                    let original_text = &content[token.start..token.end];
+                    let original_text = &content_str[token.start..token.end];
                     (original_text.to_string(), original_text.to_string())
                 }
                 TokenRenderMode::Preview => {
                     // Preview mode: display text is transformed
-                    let original_text = &content[token.start..token.end];
+                    let original_text = &content_str[token.start..token.end];
                     let display_text = match &token.token_type {
                         MarkdownToken::Bold(inner) => inner.clone(),
                         MarkdownToken::Italic(inner) => inner.clone(),
@@ -567,8 +643,8 @@ impl HybridTextRenderer {
         }
         
         // If we're past all tokens, handle remaining text
-        if original_pos < content.len() {
-            let remaining_text = &content[original_pos..];
+        if original_pos < content_str.len() {
+            let remaining_text = &content_str[original_pos..];
             let remaining_len = remaining_text.chars().count();
             
             if display_position >= display_pos {
@@ -578,7 +654,7 @@ impl HybridTextRenderer {
         }
         
         // Fallback: clamp to content bounds
-        display_position.min(content.chars().count())
+        display_position.min(content.chars_count())
     }
     
 }

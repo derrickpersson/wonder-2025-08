@@ -690,11 +690,7 @@ impl Element for EditorElement {
         let mut current_offset = 0;
 
         for line in lines {
-            let line_text = if line.is_empty() {
-                " ".to_string() // Empty lines need space for height
-            } else {
-                line.to_string()
-            };
+            // Prepare line content for rendering - avoid string conversion for non-empty lines
 
             // Calculate cursor position for this line
             let line_cursor_position = if self.cursor_position >= current_offset
@@ -719,11 +715,23 @@ impl Element for EditorElement {
             });
 
             // Get both the transformed content and the styled segments (NEW APPROACH)
-            let display_text = self.hybrid_renderer.get_display_content(&line_text, line_cursor_position, line_selection.clone());
-            let styled_segments = self.hybrid_renderer.generate_styled_text_segments(&line_text, line_cursor_position, line_selection.clone());
-            
-            // For now, use the old approach as fallback until full implementation
-            let line_runs = self.hybrid_renderer.generate_mixed_text_runs(&line_text, line_cursor_position, line_selection);
+            // Use RopeSlice directly for efficiency - no string conversion for non-empty lines
+            let (display_text, styled_segments, line_runs) = if line.is_empty() {
+                // For empty lines, use a space string
+                let empty_line = " ";
+                (
+                    self.hybrid_renderer.get_display_content(empty_line, line_cursor_position, line_selection.clone()),
+                    self.hybrid_renderer.generate_styled_text_segments(empty_line, line_cursor_position, line_selection.clone()),
+                    self.hybrid_renderer.generate_mixed_text_runs(empty_line, line_cursor_position, line_selection.clone())
+                )
+            } else {
+                // For non-empty lines, use RopeSlice directly (no string conversion!)
+                (
+                    self.hybrid_renderer.get_display_content(line, line_cursor_position, line_selection.clone()),
+                    self.hybrid_renderer.generate_styled_text_segments(line, line_cursor_position, line_selection.clone()),
+                    self.hybrid_renderer.generate_mixed_text_runs(line, line_cursor_position, line_selection)
+                )
+            };
 
             // Use the display text (transformed) for shaping, not the original line text
             let text_to_shape = if display_text.is_empty() { " ".to_string() } else { display_text };
@@ -948,12 +956,12 @@ impl EditorElement {
                     let line_selection = Some(sel_start_in_line..sel_end_in_line);
 
                     // Get the transformed content and text runs for this line
-                    let line_display_text = self.hybrid_renderer.get_display_content(line_text, line_cursor_pos, line_selection.clone());
-                    let line_runs = self.hybrid_renderer.generate_mixed_text_runs(line_text, line_cursor_pos, line_selection.clone());
+                    let line_display_text = self.hybrid_renderer.get_display_content(*line_text, line_cursor_pos, line_selection.clone());
+                    let line_runs = self.hybrid_renderer.generate_mixed_text_runs(*line_text, line_cursor_pos, line_selection.clone());
 
                     // Map selection positions from original to transformed coordinates
-                    let transformed_start = self.hybrid_renderer.map_cursor_position(line_text, sel_start_in_line, line_selection.clone());
-                    let transformed_end = self.hybrid_renderer.map_cursor_position(line_text, sel_end_in_line, line_selection.clone());
+                    let transformed_start = self.hybrid_renderer.map_cursor_position(*line_text, sel_start_in_line, line_selection.clone());
+                    let transformed_end = self.hybrid_renderer.map_cursor_position(*line_text, sel_end_in_line, line_selection.clone());
 
                     // Calculate x positions using transformed content
                     let x_start = if transformed_start == 0 {
@@ -1137,7 +1145,7 @@ impl EditorElement {
         
         // Map cursor position to transformed content coordinates
         let transformed_cursor_position = self.hybrid_renderer.map_cursor_position(
-            content, 
+            content.as_str(), 
             original_cursor_position, 
             self.selection.clone()
         );
@@ -1495,7 +1503,7 @@ mod tests {
             
             // Map from display position to original content position
             let original_position = renderer.map_display_position_to_original(
-                &content, 
+                content.as_str(), 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -1560,7 +1568,7 @@ mod tests {
             let content = self.document.content();
             
             let original_position = renderer.map_display_position_to_original(
-                &content, 
+                content.as_str(), 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -1577,7 +1585,7 @@ mod tests {
             let content = self.document.content();
             
             let original_position = renderer.map_display_position_to_original(
-                &content, 
+                content.as_str(), 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -1594,7 +1602,7 @@ mod tests {
             let content = self.document.content();
             
             let original_position = renderer.map_display_position_to_original(
-                &content, 
+                content.as_str(), 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -2117,7 +2125,7 @@ mod tests {
         // The editor should use its own hybrid renderer, which should produce proper text runs
         let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
         let text_runs = renderer.generate_mixed_text_runs(
-            &editor.content(), 
+            editor.content().as_str(), 
             editor.cursor_position(), 
             None
         );
@@ -2148,7 +2156,7 @@ mod tests {
         
         let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
         let text_runs = renderer.generate_mixed_text_runs(
-            &editor.content(), 
+            editor.content().as_str(), 
             editor.cursor_position(), 
             None
         );
@@ -2196,7 +2204,7 @@ mod tests {
             // Generate text runs with current cursor position  
             let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
             let text_runs = renderer.generate_mixed_text_runs(
-                &editor.content(),
+                editor.content().as_str(),
                 cursor_pos,
                 None
             );
@@ -2228,7 +2236,7 @@ mod tests {
         // Verify hybrid rendering still works with new content
         let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
         let text_runs = renderer.generate_mixed_text_runs(
-            &editor.content(),
+            editor.content().as_str(),
             editor.cursor_position(),
             None
         );
@@ -2289,7 +2297,7 @@ mod tests {
         // Create a hybrid renderer to test styled segments integration
         let renderer = HybridTextRenderer::new();
         let segments = renderer.generate_styled_text_segments(
-            &editor.content(),
+            editor.content().as_str(),
             editor.cursor_position(),
             None
         );
