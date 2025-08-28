@@ -127,7 +127,7 @@ impl HybridTextRenderer {
             MarkdownToken::Heading(level, _) => self.get_font_size_for_heading_level(*level),
             MarkdownToken::Code(_) => self.get_font_size_for_code(),
             MarkdownToken::Table | MarkdownToken::TableHeader | MarkdownToken::TableRow | MarkdownToken::TableCell(_) 
-            | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) | MarkdownToken::Tag(_) => self.get_font_size_for_regular_text(),
+            | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) | MarkdownToken::Tag(_) | MarkdownToken::Highlight(_) => self.get_font_size_for_regular_text(),
             _ => self.get_font_size_for_regular_text(),
         }
     }
@@ -194,6 +194,9 @@ impl HybridTextRenderer {
                         }
                         MarkdownToken::Tag(tag_content) => {
                             (format!("#{}", tag_content), FontWeight::NORMAL, FontStyle::Normal, rgb(0xf9e2af), "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Highlight(highlight_content) => {
+                            (highlight_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x000000), "SF Pro", self.get_font_size_for_regular_text())
                         }
                         _ => {
                             // For other tokens, show original text
@@ -472,6 +475,9 @@ impl HybridTextRenderer {
                         MarkdownToken::Tag(tag_content) => {
                             (format!("#{}", tag_content), FontWeight::NORMAL, FontStyle::Normal, rgb(0xf9e2af), "system-ui")
                         }
+                        MarkdownToken::Highlight(highlight_content) => {
+                            (highlight_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0x000000), "system-ui")
+                        }
                         _ => {
                             // For other tokens, show original text
                             let original_text = &original_content[token.start..token.end];
@@ -589,6 +595,7 @@ impl HybridTextRenderer {
                         MarkdownToken::Code(inner) => inner.clone(),
                         MarkdownToken::Heading(_, inner) => inner.clone(),
                         MarkdownToken::Tag(tag_content) => format!("#{}", tag_content),
+                        MarkdownToken::Highlight(highlight_content) => highlight_content.clone(),
                         _ => original_text.to_string(),
                     };
                     (display_text, original_text.to_string())

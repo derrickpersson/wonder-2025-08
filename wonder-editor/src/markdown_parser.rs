@@ -30,6 +30,7 @@ pub enum MarkdownToken {
     Footnote(String, String), // id, content
     FootnoteReference(String), // id
     Tag(String), // tag content
+    Highlight(String), // highlighted text
 }
 
 #[derive(Clone)]
@@ -219,9 +220,13 @@ impl MarkdownParser {
                 Event::Text(text) => {
                     current_text.push_str(&text);
                     if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote && !in_table_cell {
-                        // Parse hashtags in text
-                        let text_with_tags = self.parse_tags_in_text(&text);
-                        tokens.extend(text_with_tags);
+                        // Parse special tokens in text (tags, highlights)
+                        let text_with_special = if text.contains("==") {
+                            self.parse_special_tokens_in_text(&text)
+                        } else {
+                            self.parse_tags_in_text(&text)
+                        };
+                        tokens.extend(text_with_special);
                         current_text.clear();
                     }
                 }
@@ -465,9 +470,13 @@ impl MarkdownParser {
                     if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell {
                         current_text.push_str(&text);
                     } else {
-                        // Parse hashtags in text with positions
-                        let text_with_tags = self.parse_tags_in_text_with_positions(&text, range.start);
-                        tokens.extend(text_with_tags);
+                        // Parse special tokens in text with positions (tags, highlights)
+                        let text_with_special = if text.contains("==") {
+                            self.parse_special_tokens_in_text_with_positions(&text, range.start)
+                        } else {
+                            self.parse_tags_in_text_with_positions(&text, range.start)
+                        };
+                        tokens.extend(text_with_special);
                     }
                 }
                 Event::FootnoteReference(label) => {
@@ -515,6 +524,46 @@ impl MarkdownParser {
             all_tokens: all_tokens.into_iter().cloned().collect(),
             tokens,
         }
+    }
+
+    fn parse_special_tokens_in_text(&self, text: &str) -> Vec<MarkdownToken> {
+        let mut remaining_text = text;
+        let mut tokens = Vec::new();
+        let mut current_pos = 0;
+        
+        // First pass: parse highlights (avoid escaped ones)
+        let highlight_regex = regex::Regex::new(r"==([^=]+)==").unwrap();
+        let mut processed_ranges = Vec::new();
+        
+        for cap in highlight_regex.captures_iter(text) {
+            let match_obj = cap.get(0).unwrap();
+            let highlight_content = cap.get(1).unwrap().as_str();
+            
+            
+            // Add text before highlight if any
+            if match_obj.start() > current_pos {
+                let before_text = &text[current_pos..match_obj.start()];
+                tokens.extend(self.parse_tags_in_text(before_text));
+            }
+            
+            // Add highlight token
+            tokens.push(MarkdownToken::Highlight(highlight_content.to_string()));
+            processed_ranges.push(match_obj.start()..match_obj.end());
+            current_pos = match_obj.end();
+        }
+        
+        // Add remaining text after last highlight
+        if current_pos < text.len() {
+            let remaining = &text[current_pos..];
+            tokens.extend(self.parse_tags_in_text(remaining));
+        }
+        
+        // If no highlights found, just parse tags
+        if processed_ranges.is_empty() {
+            return self.parse_tags_in_text(text);
+        }
+        
+        tokens
     }
 
     fn parse_tags_in_text(&self, text: &str) -> Vec<MarkdownToken> {
@@ -596,6 +645,49 @@ impl MarkdownParser {
                 start: text_start,
                 end: text_start + text.len(),
             });
+        }
+        
+        tokens
+    }
+
+    fn parse_special_tokens_in_text_with_positions(&self, text: &str, text_start: usize) -> Vec<ParsedToken> {
+        let mut tokens = Vec::new();
+        let mut current_pos = 0;
+        
+        // First pass: parse highlights (avoid escaped ones)
+        let highlight_regex = regex::Regex::new(r"==([^=]+)==").unwrap();
+        let mut processed_ranges = Vec::new();
+        
+        for cap in highlight_regex.captures_iter(text) {
+            let match_obj = cap.get(0).unwrap();
+            let highlight_content = cap.get(1).unwrap().as_str();
+            
+            
+            // Add text before highlight if any
+            if match_obj.start() > current_pos {
+                let before_text = &text[current_pos..match_obj.start()];
+                tokens.extend(self.parse_tags_in_text_with_positions(before_text, text_start + current_pos));
+            }
+            
+            // Add highlight token with positions
+            tokens.push(ParsedToken {
+                token_type: MarkdownToken::Highlight(highlight_content.to_string()),
+                start: text_start + match_obj.start(),
+                end: text_start + match_obj.end(),
+            });
+            processed_ranges.push(match_obj.start()..match_obj.end());
+            current_pos = match_obj.end();
+        }
+        
+        // Add remaining text after last highlight
+        if current_pos < text.len() {
+            let remaining = &text[current_pos..];
+            tokens.extend(self.parse_tags_in_text_with_positions(remaining, text_start + current_pos));
+        }
+        
+        // If no highlights found, just parse tags
+        if processed_ranges.is_empty() {
+            return self.parse_tags_in_text_with_positions(text, text_start);
         }
         
         tokens
@@ -1276,5 +1368,74 @@ mod tests {
         assert!(tag_tokens.contains(&"work"));
         assert!(tag_tokens.contains(&"urgent"));
         assert!(tag_tokens.contains(&"project"));
+    }
+
+    // TDD RED: First failing test for highlight parsing (ENG-155)
+    #[test]
+    fn test_parse_highlight_basic() {
+        let parser = MarkdownParser::new();
+        let markdown = "This is ==highlighted== text";
+        let tokens = parser.parse(markdown);
+        
+        // Should find highlight token
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Highlight(s) if s == "highlighted")));
+    }
+
+    #[test]
+    fn test_parse_highlight_with_positions() {
+        let parser = MarkdownParser::new();
+        let markdown = "This is ==highlighted== text";
+        let tokens = parser.parse_with_positions(markdown);
+        
+        // Should find highlight token with correct positions
+        let highlight_tokens: Vec<_> = tokens.iter().filter(|t| matches!(t.token_type, MarkdownToken::Highlight(_))).collect();
+        assert_eq!(highlight_tokens.len(), 1);
+        assert!(matches!(highlight_tokens[0].token_type, MarkdownToken::Highlight(ref s) if s == "highlighted"));
+        
+        // Verify position tracking
+        assert!(highlight_tokens[0].start < highlight_tokens[0].end);
+    }
+
+    #[test]
+    fn test_parse_highlight_within_words() {
+        let parser = MarkdownParser::new();
+        let markdown = "This ==important word== text";
+        let tokens = parser.parse(markdown);
+        
+        // Should find highlight token for single word
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Highlight(s) if s == "important word")));
+    }
+
+    #[test]
+    fn test_parse_highlight_with_spaces() {
+        let parser = MarkdownParser::new();
+        let markdown = "Some ==highlighted text== here";
+        let tokens = parser.parse(markdown);
+        
+        // Should find highlight token with spaces
+        let highlight_tokens: Vec<_> = tokens.iter().filter_map(|t| match t {
+            MarkdownToken::Highlight(content) => Some(content.as_str()),
+            _ => None
+        }).collect();
+        
+        assert_eq!(highlight_tokens.len(), 1);
+        assert!(highlight_tokens.contains(&"highlighted text"));
+    }
+
+    #[test]
+    fn test_parse_multiple_highlights() {
+        let parser = MarkdownParser::new();
+        let markdown = "First ==highlight== and second ==emphasis== in text";
+        let tokens = parser.parse(markdown);
+        
+        // Should find both highlight tokens
+        let highlight_tokens: Vec<_> = tokens.iter().filter_map(|t| match t {
+            MarkdownToken::Highlight(content) => Some(content.as_str()),
+            _ => None
+        }).collect();
+        
+        assert_eq!(highlight_tokens.len(), 2);
+        assert!(highlight_tokens.contains(&"highlight"));
+        assert!(highlight_tokens.contains(&"emphasis"));
     }
 }
