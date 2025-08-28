@@ -6534,6 +6534,7 @@ dependencies = [
  "ropey",
  "serde",
  "serde_json",
+ "unicode-segmentation",
 ]
 
 [[package]]

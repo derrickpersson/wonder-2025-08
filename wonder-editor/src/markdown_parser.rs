@@ -31,6 +31,7 @@ pub enum MarkdownToken {
     FootnoteReference(String), // id
     Tag(String), // tag content
     Highlight(String), // highlighted text
+    Emoji(String), // emoji character(s)
 }
 
 #[derive(Clone)]
@@ -220,11 +221,11 @@ impl MarkdownParser {
                 Event::Text(text) => {
                     current_text.push_str(&text);
                     if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote && !in_table_cell {
-                        // Parse special tokens in text (tags, highlights)
+                        // Parse special tokens in text (tags, highlights, emojis)
                         let text_with_special = if text.contains("==") {
                             self.parse_special_tokens_in_text(&text)
                         } else {
-                            self.parse_tags_in_text(&text)
+                            self.parse_tags_and_emojis_in_text(&text)
                         };
                         tokens.extend(text_with_special);
                         current_text.clear();
@@ -470,11 +471,11 @@ impl MarkdownParser {
                     if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell {
                         current_text.push_str(&text);
                     } else {
-                        // Parse special tokens in text with positions (tags, highlights)
+                        // Parse special tokens in text with positions (tags, highlights, emojis)
                         let text_with_special = if text.contains("==") {
                             self.parse_special_tokens_in_text_with_positions(&text, range.start)
                         } else {
-                            self.parse_tags_in_text_with_positions(&text, range.start)
+                            self.parse_tags_and_emojis_in_text_with_positions(&text, range.start)
                         };
                         tokens.extend(text_with_special);
                     }
@@ -543,7 +544,7 @@ impl MarkdownParser {
             // Add text before highlight if any
             if match_obj.start() > current_pos {
                 let before_text = &text[current_pos..match_obj.start()];
-                tokens.extend(self.parse_tags_in_text(before_text));
+                tokens.extend(self.parse_tags_and_emojis_in_text(before_text));
             }
             
             // Add highlight token
@@ -555,12 +556,12 @@ impl MarkdownParser {
         // Add remaining text after last highlight
         if current_pos < text.len() {
             let remaining = &text[current_pos..];
-            tokens.extend(self.parse_tags_in_text(remaining));
+            tokens.extend(self.parse_tags_and_emojis_in_text(remaining));
         }
         
-        // If no highlights found, just parse tags
+        // If no highlights found, just parse tags and emojis
         if processed_ranges.is_empty() {
-            return self.parse_tags_in_text(text);
+            return self.parse_tags_and_emojis_in_text(text);
         }
         
         tokens
@@ -666,7 +667,7 @@ impl MarkdownParser {
             // Add text before highlight if any
             if match_obj.start() > current_pos {
                 let before_text = &text[current_pos..match_obj.start()];
-                tokens.extend(self.parse_tags_in_text_with_positions(before_text, text_start + current_pos));
+                tokens.extend(self.parse_tags_and_emojis_in_text_with_positions(before_text, text_start + current_pos));
             }
             
             // Add highlight token with positions
@@ -682,12 +683,154 @@ impl MarkdownParser {
         // Add remaining text after last highlight
         if current_pos < text.len() {
             let remaining = &text[current_pos..];
-            tokens.extend(self.parse_tags_in_text_with_positions(remaining, text_start + current_pos));
+            tokens.extend(self.parse_tags_and_emojis_in_text_with_positions(remaining, text_start + current_pos));
         }
         
-        // If no highlights found, just parse tags
+        // If no highlights found, just parse tags and emojis
         if processed_ranges.is_empty() {
-            return self.parse_tags_in_text_with_positions(text, text_start);
+            return self.parse_tags_and_emojis_in_text_with_positions(text, text_start);
+        }
+        
+        tokens
+    }
+
+    fn parse_tags_and_emojis_in_text(&self, text: &str) -> Vec<MarkdownToken> {
+        let text_with_tags = self.parse_tags_in_text(text);
+        let mut final_tokens = Vec::new();
+        
+        for token in text_with_tags {
+            match token {
+                MarkdownToken::Text(text_content) => {
+                    final_tokens.extend(self.parse_emojis_in_text(&text_content));
+                }
+                other => final_tokens.push(other),
+            }
+        }
+        
+        final_tokens
+    }
+
+    fn parse_emojis_in_text(&self, text: &str) -> Vec<MarkdownToken> {
+        use unicode_segmentation::UnicodeSegmentation;
+        let mut tokens = Vec::new();
+        let mut current_text = String::new();
+        
+        for grapheme in text.graphemes(true) {
+            if self.is_emoji(grapheme) {
+                // Add accumulated text before emoji if any
+                if !current_text.is_empty() {
+                    tokens.push(MarkdownToken::Text(current_text.clone()));
+                    current_text.clear();
+                }
+                
+                // Add emoji token
+                tokens.push(MarkdownToken::Emoji(grapheme.to_string()));
+            } else {
+                current_text.push_str(grapheme);
+            }
+        }
+        
+        // Add any remaining text
+        if !current_text.is_empty() {
+            tokens.push(MarkdownToken::Text(current_text));
+        }
+        
+        // If no tokens created, return original text as single token
+        if tokens.is_empty() {
+            tokens.push(MarkdownToken::Text(text.to_string()));
+        }
+        
+        tokens
+    }
+
+    fn is_emoji(&self, grapheme: &str) -> bool {
+        // Simple emoji detection using Unicode ranges
+        for ch in grapheme.chars() {
+            let code = ch as u32;
+            // Basic emoji ranges (this is simplified - real implementation would be more comprehensive)
+            if (code >= 0x1F600 && code <= 0x1F64F) || // Emoticons
+               (code >= 0x1F300 && code <= 0x1F5FF) || // Misc Symbols and Pictographs
+               (code >= 0x1F680 && code <= 0x1F6FF) || // Transport and Map
+               (code >= 0x2600 && code <= 0x26FF) ||   // Misc symbols
+               (code >= 0x2700 && code <= 0x27BF) ||   // Dingbats
+               (code >= 0xFE00 && code <= 0xFE0F) ||   // Variation Selectors
+               (code >= 0x1F900 && code <= 0x1F9FF) || // Supplemental Symbols
+               (code >= 0x1F1E6 && code <= 0x1F1FF)    // Regional Indicators (flags)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn parse_tags_and_emojis_in_text_with_positions(&self, text: &str, text_start: usize) -> Vec<ParsedToken> {
+        let text_with_tags = self.parse_tags_in_text_with_positions(text, text_start);
+        let mut final_tokens = Vec::new();
+        
+        for token in text_with_tags {
+            match token.token_type {
+                MarkdownToken::Text(text_content) => {
+                    final_tokens.extend(self.parse_emojis_in_text_with_positions(&text_content, token.start));
+                }
+                other => final_tokens.push(ParsedToken {
+                    token_type: other,
+                    start: token.start,
+                    end: token.end,
+                }),
+            }
+        }
+        
+        final_tokens
+    }
+
+    fn parse_emojis_in_text_with_positions(&self, text: &str, text_start: usize) -> Vec<ParsedToken> {
+        use unicode_segmentation::UnicodeSegmentation;
+        let mut tokens = Vec::new();
+        let mut current_text = String::new();
+        let mut current_pos = 0;
+        
+        for grapheme in text.graphemes(true) {
+            if self.is_emoji(grapheme) {
+                // Add accumulated text before emoji if any
+                if !current_text.is_empty() {
+                    let text_len = current_text.len();
+                    tokens.push(ParsedToken {
+                        token_type: MarkdownToken::Text(current_text.clone()),
+                        start: text_start + current_pos - text_len,
+                        end: text_start + current_pos,
+                    });
+                    current_text.clear();
+                }
+                
+                // Add emoji token with positions
+                tokens.push(ParsedToken {
+                    token_type: MarkdownToken::Emoji(grapheme.to_string()),
+                    start: text_start + current_pos,
+                    end: text_start + current_pos + grapheme.len(),
+                });
+            } else {
+                current_text.push_str(grapheme);
+            }
+            current_pos += grapheme.len();
+        }
+        
+        // Add any remaining text
+        if !current_text.is_empty() {
+            let text_len = current_text.len();
+            tokens.push(ParsedToken {
+                token_type: MarkdownToken::Text(current_text),
+                start: text_start + current_pos - text_len,
+                end: text_start + current_pos,
+            });
+        }
+        
+        // If no tokens created, return original text as single token
+        if tokens.is_empty() {
+            tokens.push(ParsedToken {
+                token_type: MarkdownToken::Text(text.to_string()),
+                start: text_start,
+                end: text_start + text.len(),
+            });
         }
         
         tokens
@@ -1437,5 +1580,71 @@ mod tests {
         assert_eq!(highlight_tokens.len(), 2);
         assert!(highlight_tokens.contains(&"highlight"));
         assert!(highlight_tokens.contains(&"emphasis"));
+    }
+
+    // TDD RED: First failing test for emoji parsing (ENG-163)
+    #[test]
+    fn test_parse_emoji_basic() {
+        let parser = MarkdownParser::new();
+        let markdown = "Hello 😀 World 🚀";
+        let tokens = parser.parse(markdown);
+        
+        // Should find emoji tokens
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Emoji(s) if s == "😀")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Emoji(s) if s == "🚀")));
+    }
+
+    #[test]
+    fn test_parse_emoji_with_positions() {
+        let parser = MarkdownParser::new();
+        let markdown = "Hello 😀 World";
+        let tokens = parser.parse_with_positions(markdown);
+        
+        // Should find emoji token with correct positions
+        let emoji_tokens: Vec<_> = tokens.iter().filter(|t| matches!(t.token_type, MarkdownToken::Emoji(_))).collect();
+        assert_eq!(emoji_tokens.len(), 1);
+        assert!(matches!(emoji_tokens[0].token_type, MarkdownToken::Emoji(ref s) if s == "😀"));
+        
+        // Verify position tracking
+        assert!(emoji_tokens[0].start < emoji_tokens[0].end);
+    }
+
+    #[test]
+    fn test_parse_emoji_complex() {
+        let parser = MarkdownParser::new();
+        let markdown = "Developer 👨‍💻 and flag 🏳️‍🌈";
+        let tokens = parser.parse(markdown);
+        
+        // Should find complex emoji tokens
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Emoji(s) if s == "👨‍💻")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Emoji(s) if s == "🏳️‍🌈")));
+    }
+
+    #[test]
+    fn test_parse_emoji_in_formatting() {
+        let parser = MarkdownParser::new();
+        let markdown = "**Bold 😀 text**";
+        let tokens = parser.parse(markdown);
+        
+        // Should find emoji within bold formatting
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Bold(s) if s.contains("😀"))));
+    }
+
+    #[test]
+    fn test_parse_multiple_emoji() {
+        let parser = MarkdownParser::new();
+        let markdown = "🎉 🎊 🥳 Party time!";
+        let tokens = parser.parse(markdown);
+        
+        // Should find all emoji tokens
+        let emoji_tokens: Vec<_> = tokens.iter().filter_map(|t| match t {
+            MarkdownToken::Emoji(content) => Some(content.as_str()),
+            _ => None
+        }).collect();
+        
+        assert_eq!(emoji_tokens.len(), 3);
+        assert!(emoji_tokens.contains(&"🎉"));
+        assert!(emoji_tokens.contains(&"🎊"));
+        assert!(emoji_tokens.contains(&"🥳"));
     }
 }
