@@ -70,7 +70,7 @@ impl MarkdownEditor {
     }
 
     // Content access
-    pub fn content(&self) -> &str {
+    pub fn content(&self) -> String {
         self.document.content()
     }
 
@@ -110,7 +110,7 @@ impl MarkdownEditor {
 
 
     // Legacy compatibility methods for tests
-    pub fn get_content(&self) -> &str {
+    pub fn get_content(&self) -> String {
         self.content()
     }
 
@@ -284,7 +284,7 @@ impl MarkdownEditor {
         let clamped_position = position.min(max_pos);
         
         // Find word boundaries around the clicked position
-        let (word_start, word_end) = self.find_word_boundaries(content, clamped_position);
+        let (word_start, word_end) = self.find_word_boundaries(&content, clamped_position);
         
         // Set selection to cover the word
         self.document.set_cursor_position(word_start);
@@ -298,7 +298,7 @@ impl MarkdownEditor {
         let clamped_position = position.min(max_pos);
         
         // Find line boundaries around the clicked position
-        let (line_start, line_end) = self.find_line_boundaries(content, clamped_position);
+        let (line_start, line_end) = self.find_line_boundaries(&content, clamped_position);
         
         // Set selection to cover the line
         self.document.set_cursor_position(line_start);
@@ -1419,7 +1419,7 @@ mod tests {
 
     impl TestableEditor {
         // Mirror the methods we need for testing
-        pub fn content(&self) -> &str {
+        pub fn content(&self) -> String {
             self.document.content()
         }
 
@@ -1440,7 +1440,7 @@ mod tests {
             self.focused
         }
 
-        pub fn get_content(&self) -> &str {
+        pub fn get_content(&self) -> String {
             self.content()
         }
 
@@ -1495,7 +1495,7 @@ mod tests {
             
             // Map from display position to original content position
             let original_position = renderer.map_display_position_to_original(
-                content, 
+                &content, 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -1560,7 +1560,7 @@ mod tests {
             let content = self.document.content();
             
             let original_position = renderer.map_display_position_to_original(
-                content, 
+                &content, 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -1577,7 +1577,7 @@ mod tests {
             let content = self.document.content();
             
             let original_position = renderer.map_display_position_to_original(
-                content, 
+                &content, 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -1594,7 +1594,7 @@ mod tests {
             let content = self.document.content();
             
             let original_position = renderer.map_display_position_to_original(
-                content, 
+                &content, 
                 display_position, 
                 cursor_pos,
                 self.document.selection_range()
@@ -1632,7 +1632,7 @@ mod tests {
             let clamped_position = position.min(max_pos);
             
             // Find word boundaries around the clicked position
-            let (word_start, word_end) = self.find_word_boundaries(content, clamped_position);
+            let (word_start, word_end) = self.find_word_boundaries(&content, clamped_position);
             
             // Set selection to cover the word
             self.document.set_cursor_position(word_start);
@@ -1649,7 +1649,7 @@ mod tests {
             let clamped_position = position.min(max_pos);
             
             // Find line boundaries around the clicked position
-            let (line_start, line_end) = self.find_line_boundaries(content, clamped_position);
+            let (line_start, line_end) = self.find_line_boundaries(&content, clamped_position);
             
             // Set selection to cover the line
             self.document.set_cursor_position(line_start);
@@ -2117,7 +2117,7 @@ mod tests {
         // The editor should use its own hybrid renderer, which should produce proper text runs
         let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
         let text_runs = renderer.generate_mixed_text_runs(
-            editor.content(), 
+            &editor.content(), 
             editor.cursor_position(), 
             None
         );
@@ -2148,7 +2148,7 @@ mod tests {
         
         let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
         let text_runs = renderer.generate_mixed_text_runs(
-            editor.content(), 
+            &editor.content(), 
             editor.cursor_position(), 
             None
         );
@@ -2196,7 +2196,7 @@ mod tests {
             // Generate text runs with current cursor position  
             let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
             let text_runs = renderer.generate_mixed_text_runs(
-                editor.content(),
+                &editor.content(),
                 cursor_pos,
                 None
             );
@@ -2228,7 +2228,7 @@ mod tests {
         // Verify hybrid rendering still works with new content
         let renderer = crate::hybrid_renderer::HybridTextRenderer::new();
         let text_runs = renderer.generate_mixed_text_runs(
-            editor.content(),
+            &editor.content(),
             editor.cursor_position(),
             None
         );
@@ -2289,7 +2289,7 @@ mod tests {
         // Create a hybrid renderer to test styled segments integration
         let renderer = HybridTextRenderer::new();
         let segments = renderer.generate_styled_text_segments(
-            editor.content(),
+            &editor.content(),
             editor.cursor_position(),
             None
         );

@@ -1,9 +1,9 @@
 use super::{cursor::Cursor, selection::Selection};
 use ropey::Rope;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TextDocument {
-    content: String,
+    content: Rope,
     cursor: Cursor,
     selection: Selection,
     clipboard: Option<String>,
@@ -12,7 +12,7 @@ pub struct TextDocument {
 impl TextDocument {
     pub fn new() -> Self {
         Self {
-            content: String::new(),
+            content: Rope::new(),
             cursor: Cursor::new(),
             selection: Selection::new(),
             clipboard: None,
@@ -23,7 +23,7 @@ impl TextDocument {
         let mut cursor = Cursor::new();
         cursor.set_position(content.chars().count());
         Self {
-            content,
+            content: Rope::from_str(&content),
             cursor,
             selection: Selection::new(),
             clipboard: None,
@@ -31,16 +31,16 @@ impl TextDocument {
     }
 
     // Content access
-    pub fn content(&self) -> &str {
-        &self.content
+    pub fn content(&self) -> String {
+        self.content.to_string()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.content.is_empty()
+        self.content.len_chars() == 0
     }
 
     pub fn len(&self) -> usize {
-        self.content.chars().count()
+        self.content.len_chars()
     }
 
     // Cursor operations
@@ -49,7 +49,7 @@ impl TextDocument {
     }
 
     pub fn set_cursor_position(&mut self, position: usize) {
-        let max_pos = self.content.chars().count();
+        let max_pos = self.content.len_chars();
         let clamped_position = position.min(max_pos);
         self.cursor.set_position(clamped_position);
         // Note: Deliberately NOT clearing selection here to support selection operations
@@ -66,7 +66,7 @@ impl TextDocument {
 
     pub fn selected_text(&self) -> Option<String> {
         self.selection_range().map(|(start, end)| {
-            self.content[start..end].to_string()
+            self.content.slice(start..end).to_string()
         })
     }
 
@@ -79,7 +79,7 @@ impl TextDocument {
     }
 
     pub fn select_all(&mut self) {
-        self.cursor.set_position(self.content.chars().count());
+        self.cursor.set_position(self.content.len_chars());
         self.selection.start(0);
     }
 
@@ -115,14 +115,15 @@ impl TextDocument {
 
     fn wrap_selection_with(&mut self, start_marker: &str, end_marker: &str) {
         if let Some((start, end)) = self.selection_range() {
-            let selected_content = self.content[start..end].to_string();
+            let selected_content = self.content.slice(start..end).to_string();
             let wrapped_content = format!("{}{}{}", start_marker, selected_content, end_marker);
             
             // Replace selected text with wrapped content
             let char_start = self.byte_to_char_position(start);
             let _char_end = self.byte_to_char_position(end);
             
-            self.content.replace_range(start..end, &wrapped_content);
+            self.content.remove(start..end);
+            self.content.insert(start, &wrapped_content);
             
             // Update cursor position to end of wrapped content
             let new_position = char_start + wrapped_content.chars().count();
@@ -134,7 +135,7 @@ impl TextDocument {
     }
 
     fn byte_to_char_position(&self, byte_position: usize) -> usize {
-        self.content[..byte_position].chars().count()
+        byte_position.min(self.content.len_chars())
     }
 
     fn selection_has_formatting(&self, start_marker: &str, end_marker: &str) -> bool {
@@ -143,12 +144,12 @@ impl TextDocument {
             let end_marker_len = end_marker.len();
             
             // Check if there's enough content before and after selection for markers
-            if start < start_marker_len || end + end_marker_len > self.content.len() {
+            if start < start_marker_len || end + end_marker_len > self.content.len_chars() {
                 return false;
             }
             
-            let before_selection = &self.content[start - start_marker_len..start];
-            let after_selection = &self.content[end..end + end_marker_len];
+            let before_selection = self.content.slice(start - start_marker_len..start).to_string();
+            let after_selection = self.content.slice(end..end + end_marker_len).to_string();
             
             before_selection == start_marker && after_selection == end_marker
         } else {
@@ -162,10 +163,10 @@ impl TextDocument {
             let end_marker_len = end_marker.len();
             
             // Remove end marker first (so positions don't change)
-            self.content.replace_range(end..end + end_marker_len, "");
+            self.content.remove(end..end + end_marker_len);
             
             // Remove start marker
-            self.content.replace_range(start - start_marker_len..start, "");
+            self.content.remove(start - start_marker_len..start);
             
             // Update cursor position
             let char_start = self.byte_to_char_position(start - start_marker_len);
@@ -184,12 +185,10 @@ impl TextDocument {
             self.delete_selection();
         }
         
-        let char_position = self.cursor.position();
-        let byte_position = self.char_position_to_byte_position(char_position);
-        self.content.insert(byte_position, ch);
-        // Move cursor forward by exactly 1 character position
-        let max_position = self.content.chars().count();
-        self.cursor.set_position((char_position + 1).min(max_position));
+        let position = self.cursor.position();
+        self.content.insert_char(position, ch);
+        let max_position = self.content.len_chars();
+        self.cursor.set_position((position + 1).min(max_position));
     }
 
     pub fn insert_text(&mut self, text: &str) {
@@ -197,11 +196,10 @@ impl TextDocument {
             self.delete_selection();
         }
         
-        let char_position = self.cursor.position();
-        let byte_position = self.char_position_to_byte_position(char_position);
-        self.content.insert_str(byte_position, text);
-        let new_char_position = char_position + text.chars().count();
-        self.cursor.set_position(new_char_position);
+        let position = self.cursor.position();
+        self.content.insert(position, text);
+        let new_position = position + text.chars().count();
+        self.cursor.set_position(new_position);
     }
 
     pub fn delete_char(&mut self) -> bool {
@@ -209,11 +207,9 @@ impl TextDocument {
             return self.delete_selection();
         }
         
-        let char_position = self.cursor.position();
-        let char_count = self.content.chars().count();
-        if char_position < char_count {
-            let byte_position = self.char_position_to_byte_position(char_position);
-            self.content.remove(byte_position);
+        let position = self.cursor.position();
+        if position < self.content.len_chars() {
+            self.content.remove(position..position + 1);
             true
         } else {
             false
@@ -225,11 +221,10 @@ impl TextDocument {
             return self.delete_selection();
         }
         
-        let char_position = self.cursor.position();
-        if char_position > 0 {
+        let position = self.cursor.position();
+        if position > 0 {
+            self.content.remove(position - 1..position);
             self.cursor.move_left();
-            let byte_position = self.char_position_to_byte_position(char_position - 1);
-            self.content.remove(byte_position);
             true
         } else {
             false
@@ -238,7 +233,7 @@ impl TextDocument {
 
     pub fn delete_selection(&mut self) -> bool {
         if let Some((start, end)) = self.selection_range() {
-            self.content.drain(start..end);
+            self.content.remove(start..end);
             self.cursor.set_position(start);
             self.selection.clear();
             true
@@ -253,7 +248,7 @@ impl TextDocument {
     }
 
     pub fn move_cursor_right(&mut self) {
-        self.cursor.move_right(self.content.chars().count());
+        self.cursor.move_right(self.content.len_chars());
     }
 
     // Selection extension methods
@@ -281,7 +276,7 @@ impl TextDocument {
         }
         
         // Move cursor right
-        self.cursor.move_right(self.content.chars().count());
+        self.cursor.move_right(self.content.len_chars());
         
         // Clear selection if cursor returns to anchor
         if let Some(anchor) = self.selection.anchor() {
@@ -304,13 +299,14 @@ impl TextDocument {
 
     pub fn move_cursor_down(&mut self) {
         let (line_index, column) = self.get_cursor_line_and_column();
-        let lines: Vec<&str> = self.content.lines().collect();
+        let content_string = self.content.to_string();
+        let lines: Vec<&str> = content_string.lines().collect();
         if line_index + 1 < lines.len() {
             let new_position = self.get_position_from_line_and_column(line_index + 1, column);
             self.set_cursor_position(new_position);
         } else {
             // When on last line, move to end of document
-            self.set_cursor_position(self.content.chars().count());
+            self.set_cursor_position(self.content.len_chars());
         }
     }
 
@@ -322,7 +318,8 @@ impl TextDocument {
 
     pub fn move_to_line_end(&mut self) {
         let (line_index, _) = self.get_cursor_line_and_column();
-        let lines: Vec<&str> = self.content.lines().collect();
+        let content_string = self.content.to_string();
+        let lines: Vec<&str> = content_string.lines().collect();
         let line_length = lines.get(line_index).map(|line| line.chars().count()).unwrap_or(0);
         let position = self.get_position_from_line_and_column(line_index, line_length);
         self.set_cursor_position(position);
@@ -333,7 +330,7 @@ impl TextDocument {
     }
 
     pub fn move_to_document_end(&mut self) {
-        self.set_cursor_position(self.content.chars().count());
+        self.set_cursor_position(self.content.len_chars());
     }
 
     // Word navigation methods
@@ -393,7 +390,8 @@ impl TextDocument {
     pub fn move_page_down(&mut self) {
         // For now, implement as moving down by 10 lines (typical page size)
         let (line_index, column) = self.get_cursor_line_and_column();
-        let lines: Vec<&str> = self.content.lines().collect();
+        let content_string = self.content.to_string();
+        let lines: Vec<&str> = content_string.lines().collect();
         let target_line = (line_index + 10).min(lines.len().saturating_sub(1));
         let new_position = self.get_position_from_line_and_column(target_line, column);
         self.set_cursor_position(new_position);
@@ -421,7 +419,7 @@ impl TextDocument {
             self.selection.start(self.cursor.position());
         }
         
-        self.set_cursor_position(self.content.chars().count());
+        self.set_cursor_position(self.content.len_chars());
         
         // Clear selection if cursor returns to anchor
         if let Some(anchor) = self.selection.anchor() {
@@ -433,7 +431,7 @@ impl TextDocument {
 
     // Helper methods for word boundary detection
     fn find_word_start(&self, position: usize) -> usize {
-        let chars: Vec<char> = self.content.chars().collect();
+        let chars: Vec<char> = self.content.to_string().chars().collect();
         
         // If at start of document, stay there
         if position == 0 {
@@ -472,7 +470,7 @@ impl TextDocument {
     }
     
     fn find_word_end(&self, position: usize) -> usize {
-        let chars: Vec<char> = self.content.chars().collect();
+        let chars: Vec<char> = self.content.to_string().chars().collect();
         let max_position = chars.len();
         
         // If at end of document, stay there
@@ -514,7 +512,7 @@ impl TextDocument {
     // Helper methods for line/column calculations
     fn get_cursor_line_and_column(&self) -> (usize, usize) {
         let char_position = self.cursor.position();
-        let chars: Vec<char> = self.content.chars().collect();
+        let chars: Vec<char> = self.content.to_string().chars().collect();
         let content_up_to_cursor: String = chars.iter().take(char_position).collect();
         let line_index = content_up_to_cursor.matches('\n').count();
         let column = content_up_to_cursor
@@ -526,7 +524,8 @@ impl TextDocument {
     }
 
     fn get_position_from_line_and_column(&self, line_index: usize, column: usize) -> usize {
-        let lines: Vec<&str> = self.content.lines().collect();
+        let content_string = self.content.to_string();
+        let lines: Vec<&str> = content_string.lines().collect();
         let mut position = 0;
         
         for (i, line) in lines.iter().enumerate() {
@@ -537,15 +536,12 @@ impl TextDocument {
             position += line.chars().count() + 1; // +1 for newline
         }
         
-        position.min(self.content.chars().count())
+        position.min(self.content.len_chars())
     }
 
     fn char_position_to_byte_position(&self, char_position: usize) -> usize {
-        self.content
-            .char_indices()
-            .nth(char_position)
-            .map(|(byte_pos, _)| byte_pos)
-            .unwrap_or(self.content.len())
+        // For rope, we can directly use char position since rope uses character indexing
+        char_position.min(self.content.len_chars())
     }
 }
 
@@ -792,7 +788,7 @@ impl TextDocument {
 
     fn get_current_line_with_newline(&self) -> String {
         let cursor_pos = self.cursor_position();
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         
         // Find line start
         let mut line_start = cursor_pos;
@@ -814,7 +810,7 @@ impl TextDocument {
 
     fn delete_current_line(&mut self) {
         let cursor_pos = self.cursor_position();
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         
         // Find line start
         let mut line_start = cursor_pos;
@@ -837,12 +833,12 @@ impl TextDocument {
             .chain(content_chars[line_end..].iter())
             .collect();
         
-        self.content = new_content;
+        self.content = Rope::from_str(&new_content);
         // Set cursor to start of next line (or end if this was last line)
-        let new_cursor_pos = if line_start < self.content.chars().count() {
+        let new_cursor_pos = if line_start < self.content.len_chars() {
             line_start
         } else {
-            self.content.chars().count()
+            self.content.len_chars()
         };
         self.set_cursor_position(new_cursor_pos);
     }
@@ -864,7 +860,7 @@ impl TextDocument {
     /// Delete the previous word from cursor position
     pub fn delete_previous_word(&mut self) {
         let cursor_pos = self.cursor_position();
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         
         if cursor_pos == 0 {
             return; // Nothing to delete
@@ -879,14 +875,14 @@ impl TextDocument {
             .chain(content_chars[cursor_pos..].iter())
             .collect();
         
-        self.content = new_content;
+        self.content = Rope::from_str(&new_content);
         self.set_cursor_position(word_start);
     }
 
     /// Delete the next word from cursor position
     pub fn delete_next_word(&mut self) {
         let cursor_pos = self.cursor_position();
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         
         if cursor_pos >= content_chars.len() {
             return; // Nothing to delete
@@ -901,14 +897,14 @@ impl TextDocument {
             .chain(content_chars[word_end..].iter())
             .collect();
         
-        self.content = new_content;
+        self.content = Rope::from_str(&new_content);
         // Cursor position stays the same
     }
 
     /// Delete from cursor to line start
     pub fn delete_to_line_start(&mut self) {
         let cursor_pos = self.cursor_position();
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         
         // Find line start
         let mut line_start = cursor_pos;
@@ -922,14 +918,14 @@ impl TextDocument {
             .chain(content_chars[cursor_pos..].iter())
             .collect();
         
-        self.content = new_content;
+        self.content = Rope::from_str(&new_content);
         self.set_cursor_position(line_start);
     }
 
     /// Delete from cursor to line end
     pub fn delete_to_line_end(&mut self) {
         let cursor_pos = self.cursor_position();
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         
         // Find line end (not including newline)
         let mut line_end = cursor_pos;
@@ -943,13 +939,13 @@ impl TextDocument {
             .chain(content_chars[line_end..].iter())
             .collect();
         
-        self.content = new_content;
+        self.content = Rope::from_str(&new_content);
         // Cursor position stays the same
     }
 
     /// Find word boundary going backward from position
     fn find_word_boundary_backward(&self, from_pos: usize) -> usize {
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         let mut pos = from_pos;
         
         if pos == 0 {
@@ -984,7 +980,7 @@ impl TextDocument {
 
     /// Find word boundary going forward from position  
     fn find_word_boundary_forward(&self, from_pos: usize) -> usize {
-        let content_chars: Vec<char> = self.content.chars().collect();
+        let content_chars: Vec<char> = self.content.to_string().chars().collect();
         let mut pos = from_pos;
         
         if pos >= content_chars.len() {
