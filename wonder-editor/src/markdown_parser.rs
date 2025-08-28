@@ -29,6 +29,7 @@ pub enum MarkdownToken {
     TableCell(String),
     Footnote(String, String), // id, content
     FootnoteReference(String), // id
+    Tag(String), // tag content
 }
 
 #[derive(Clone)]
@@ -218,7 +219,9 @@ impl MarkdownParser {
                 Event::Text(text) => {
                     current_text.push_str(&text);
                     if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote && !in_table_cell {
-                        tokens.push(MarkdownToken::Text(text.to_string()));
+                        // Parse hashtags in text
+                        let text_with_tags = self.parse_tags_in_text(&text);
+                        tokens.extend(text_with_tags);
                         current_text.clear();
                     }
                 }
@@ -461,6 +464,10 @@ impl MarkdownParser {
                 Event::Text(text) => {
                     if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell {
                         current_text.push_str(&text);
+                    } else {
+                        // Parse hashtags in text with positions
+                        let text_with_tags = self.parse_tags_in_text_with_positions(&text, range.start);
+                        tokens.extend(text_with_tags);
                     }
                 }
                 Event::FootnoteReference(label) => {
@@ -508,6 +515,90 @@ impl MarkdownParser {
             all_tokens: all_tokens.into_iter().cloned().collect(),
             tokens,
         }
+    }
+
+    fn parse_tags_in_text(&self, text: &str) -> Vec<MarkdownToken> {
+        let mut tokens = Vec::new();
+        let tag_regex = regex::Regex::new(r"#([a-zA-Z0-9_\-/.]+)").unwrap();
+        let mut last_end = 0;
+        
+        for cap in tag_regex.captures_iter(text) {
+            let match_obj = cap.get(0).unwrap();
+            let tag_content = cap.get(1).unwrap().as_str();
+            
+            // Add text before tag if any
+            if match_obj.start() > last_end {
+                let before_text = &text[last_end..match_obj.start()];
+                tokens.push(MarkdownToken::Text(before_text.to_string()));
+            }
+            
+            // Add tag token
+            tokens.push(MarkdownToken::Tag(tag_content.to_string()));
+            last_end = match_obj.end();
+        }
+        
+        // Add remaining text after last tag
+        if last_end < text.len() {
+            let remaining_text = &text[last_end..];
+            tokens.push(MarkdownToken::Text(remaining_text.to_string()));
+        }
+        
+        // If no tags found, return original text as single token
+        if tokens.is_empty() {
+            tokens.push(MarkdownToken::Text(text.to_string()));
+        }
+        
+        tokens
+    }
+
+    fn parse_tags_in_text_with_positions(&self, text: &str, text_start: usize) -> Vec<ParsedToken> {
+        let mut tokens = Vec::new();
+        let tag_regex = regex::Regex::new(r"#([a-zA-Z0-9_\-/.]+)").unwrap();
+        let mut last_end = 0;
+        
+        for cap in tag_regex.captures_iter(text) {
+            let match_obj = cap.get(0).unwrap();
+            let tag_content = cap.get(1).unwrap().as_str();
+            
+            // Add text before tag if any
+            if match_obj.start() > last_end {
+                let before_text = &text[last_end..match_obj.start()];
+                tokens.push(ParsedToken {
+                    token_type: MarkdownToken::Text(before_text.to_string()),
+                    start: text_start + last_end,
+                    end: text_start + match_obj.start(),
+                });
+            }
+            
+            // Add tag token with positions
+            tokens.push(ParsedToken {
+                token_type: MarkdownToken::Tag(tag_content.to_string()),
+                start: text_start + match_obj.start(),
+                end: text_start + match_obj.end(),
+            });
+            last_end = match_obj.end();
+        }
+        
+        // Add remaining text after last tag
+        if last_end < text.len() {
+            let remaining_text = &text[last_end..];
+            tokens.push(ParsedToken {
+                token_type: MarkdownToken::Text(remaining_text.to_string()),
+                start: text_start + last_end,
+                end: text_start + text.len(),
+            });
+        }
+        
+        // If no tags found, return original text as single token
+        if tokens.is_empty() {
+            tokens.push(ParsedToken {
+                token_type: MarkdownToken::Text(text.to_string()),
+                start: text_start,
+                end: text_start + text.len(),
+            });
+        }
+        
+        tokens
     }
 }
 
@@ -789,9 +880,10 @@ mod tests {
         assert!(matches!(context_at_bold.current_token.unwrap().token_type, MarkdownToken::Bold(_)));
         
         // Use a position that's definitely after the bold token
-        let context_at_plain = parser.get_current_token_context(markdown, 25);
-        // Should be None since no token covers this position
-        assert!(context_at_plain.current_token.is_none());
+        let context_at_plain = parser.get_current_token_context(markdown, 23);
+        // Should have a Text token since we now parse all text into tokens
+        assert!(context_at_plain.current_token.is_some());
+        assert!(matches!(context_at_plain.current_token.unwrap().token_type, MarkdownToken::Text(_)));
     }
 
     #[test]
@@ -1119,5 +1211,70 @@ mod tests {
         
         // Should find named footnote reference
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::FootnoteReference(id) if id == "my-note")));
+    }
+
+    // TDD RED: First failing test for tag parsing (ENG-160)
+    #[test]
+    fn test_parse_tag_simple() {
+        let parser = MarkdownParser::new();
+        let markdown = "This is #important text";
+        let tokens = parser.parse(markdown);
+        
+        // Should find tag token
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Tag(s) if s == "important")));
+    }
+
+    #[test]
+    fn test_parse_tag_with_positions() {
+        let parser = MarkdownParser::new();
+        let markdown = "This is #important text";
+        let tokens = parser.parse_with_positions(markdown);
+        
+        // Should find tag token with correct positions
+        let tag_tokens: Vec<_> = tokens.iter().filter(|t| matches!(t.token_type, MarkdownToken::Tag(_))).collect();
+        assert_eq!(tag_tokens.len(), 1);
+        assert!(matches!(tag_tokens[0].token_type, MarkdownToken::Tag(ref s) if s == "important"));
+        
+        // Verify position tracking
+        assert!(tag_tokens[0].start < tag_tokens[0].end);
+    }
+
+    #[test]
+    fn test_parse_tag_nested() {
+        let parser = MarkdownParser::new();
+        let markdown = "Tagged with #work/project/urgent";
+        let tokens = parser.parse(markdown);
+        
+        // Should find nested tag token
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Tag(s) if s == "work/project/urgent")));
+    }
+
+    #[test]
+    fn test_parse_tag_with_numbers() {
+        let parser = MarkdownParser::new();
+        let markdown = "Version #v1.2.3 and #meeting2024";
+        let tokens = parser.parse(markdown);
+        
+        // Should find tags with numbers
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Tag(s) if s == "v1.2.3")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Tag(s) if s == "meeting2024")));
+    }
+
+    #[test]
+    fn test_parse_multiple_tags() {
+        let parser = MarkdownParser::new();
+        let markdown = "#work #urgent #project meeting notes";
+        let tokens = parser.parse(markdown);
+        
+        // Should find all three tags
+        let tag_tokens: Vec<_> = tokens.iter().filter_map(|t| match t {
+            MarkdownToken::Tag(content) => Some(content.as_str()),
+            _ => None
+        }).collect();
+        
+        assert_eq!(tag_tokens.len(), 3);
+        assert!(tag_tokens.contains(&"work"));
+        assert!(tag_tokens.contains(&"urgent"));
+        assert!(tag_tokens.contains(&"project"));
     }
 }

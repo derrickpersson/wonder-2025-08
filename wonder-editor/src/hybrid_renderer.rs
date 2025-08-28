@@ -127,7 +127,7 @@ impl HybridTextRenderer {
             MarkdownToken::Heading(level, _) => self.get_font_size_for_heading_level(*level),
             MarkdownToken::Code(_) => self.get_font_size_for_code(),
             MarkdownToken::Table | MarkdownToken::TableHeader | MarkdownToken::TableRow | MarkdownToken::TableCell(_) 
-            | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) => self.get_font_size_for_regular_text(),
+            | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) | MarkdownToken::Tag(_) => self.get_font_size_for_regular_text(),
             _ => self.get_font_size_for_regular_text(),
         }
     }
@@ -191,6 +191,9 @@ impl HybridTextRenderer {
                         }
                         MarkdownToken::Code(inner_content) => {
                             (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xa6da95), "monospace", self.get_font_size_for_code())
+                        }
+                        MarkdownToken::Tag(tag_content) => {
+                            (format!("#{}", tag_content), FontWeight::NORMAL, FontStyle::Normal, rgb(0xf9e2af), "SF Pro", self.get_font_size_for_regular_text())
                         }
                         _ => {
                             // For other tokens, show original text
@@ -466,6 +469,9 @@ impl HybridTextRenderer {
                         MarkdownToken::Code(inner_content) => {
                             (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xa6da95), "monospace")
                         }
+                        MarkdownToken::Tag(tag_content) => {
+                            (format!("#{}", tag_content), FontWeight::NORMAL, FontStyle::Normal, rgb(0xf9e2af), "system-ui")
+                        }
                         _ => {
                             // For other tokens, show original text
                             let original_text = &original_content[token.start..token.end];
@@ -582,6 +588,7 @@ impl HybridTextRenderer {
                         MarkdownToken::Italic(inner) => inner.clone(),
                         MarkdownToken::Code(inner) => inner.clone(),
                         MarkdownToken::Heading(_, inner) => inner.clone(),
+                        MarkdownToken::Tag(tag_content) => format!("#{}", tag_content),
                         _ => original_text.to_string(),
                     };
                     (display_text, original_text.to_string())
