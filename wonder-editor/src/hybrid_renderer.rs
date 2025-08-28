@@ -126,7 +126,8 @@ impl HybridTextRenderer {
         match &token.token_type {
             MarkdownToken::Heading(level, _) => self.get_font_size_for_heading_level(*level),
             MarkdownToken::Code(_) => self.get_font_size_for_code(),
-            MarkdownToken::Table | MarkdownToken::TableHeader | MarkdownToken::TableRow | MarkdownToken::TableCell(_) => self.get_font_size_for_regular_text(),
+            MarkdownToken::Table | MarkdownToken::TableHeader | MarkdownToken::TableRow | MarkdownToken::TableCell(_) 
+            | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) => self.get_font_size_for_regular_text(),
             _ => self.get_font_size_for_regular_text(),
         }
     }

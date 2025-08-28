@@ -27,6 +27,8 @@ pub enum MarkdownToken {
     TableHeader,
     TableRow,
     TableCell(String),
+    Footnote(String, String), // id, content
+    FootnoteReference(String), // id
 }
 
 #[derive(Clone)]
@@ -229,6 +231,9 @@ impl MarkdownParser {
                 }
                 Event::Rule => {
                     tokens.push(MarkdownToken::HorizontalRule);
+                }
+                Event::FootnoteReference(label) => {
+                    tokens.push(MarkdownToken::FootnoteReference(label.to_string()));
                 }
                 _ => {}
             }
@@ -457,6 +462,13 @@ impl MarkdownParser {
                     if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell {
                         current_text.push_str(&text);
                     }
+                }
+                Event::FootnoteReference(label) => {
+                    tokens.push(ParsedToken {
+                        token_type: MarkdownToken::FootnoteReference(label.to_string()),
+                        start: range.start,
+                        end: range.end,
+                    });
                 }
                 Event::Code(code) => {
                     tokens.push(ParsedToken {
@@ -1052,5 +1064,60 @@ mod tests {
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Left")));
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Center")));
         assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Right")));
+    }
+
+    // TDD RED: First failing test for footnote parsing (ENG-154)
+    #[test]
+    fn test_parse_footnote_reference() {
+        let parser = MarkdownParser::new();
+        let markdown = "Text with footnote[^1] reference.
+
+[^1]: This is a footnote definition.";
+        let tokens = parser.parse(markdown);
+        
+        // Should find footnote reference token
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::FootnoteReference(id) if id == "1")));
+    }
+
+    #[test]
+    fn test_parse_footnote_with_positions() {
+        let parser = MarkdownParser::new();
+        let markdown = "Text with footnote[^note] reference.
+
+[^note]: This is a footnote.";
+        let tokens = parser.parse_with_positions(markdown);
+        
+        // Should find footnote reference with position tracking
+        let footnote_refs: Vec<_> = tokens.iter().filter(|t| matches!(t.token_type, MarkdownToken::FootnoteReference(_))).collect();
+        assert_eq!(footnote_refs.len(), 1);
+        
+        // Verify position tracking works
+        assert!(footnote_refs[0].start < footnote_refs[0].end);
+    }
+
+    #[test]
+    fn test_parse_multiple_footnote_references() {
+        let parser = MarkdownParser::new();
+        let markdown = "First[^1] and second[^2] footnotes.
+
+[^1]: First footnote.
+[^2]: Second footnote.";
+        let tokens = parser.parse(markdown);
+        
+        // Should find both footnote references
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::FootnoteReference(id) if id == "1")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::FootnoteReference(id) if id == "2")));
+    }
+
+    #[test]
+    fn test_parse_footnote_with_named_reference() {
+        let parser = MarkdownParser::new();
+        let markdown = "Text with named footnote[^my-note] reference.
+
+[^my-note]: This is a named footnote.";
+        let tokens = parser.parse(markdown);
+        
+        // Should find named footnote reference
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::FootnoteReference(id) if id == "my-note")));
     }
 }
