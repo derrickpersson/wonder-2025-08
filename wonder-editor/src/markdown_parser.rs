@@ -23,6 +23,10 @@ pub enum MarkdownToken {
     TaskListItem(bool, String), // checked, text
     HorizontalRule,
     Image(String, String, Option<String>), // alt, url, title
+    Table,
+    TableHeader,
+    TableRow,
+    TableCell(String),
 }
 
 #[derive(Clone)]
@@ -60,6 +64,10 @@ impl MarkdownParser {
         let mut image_alt = String::new();
         let mut image_url = String::new();
         let mut image_title: Option<String> = None;
+        let mut in_table = false;
+        let mut in_table_head = false;
+        let mut in_table_row = false;
+        let mut in_table_cell = false;
         
         for event in parser {
             match event {
@@ -96,6 +104,22 @@ impl MarkdownParser {
                     }
                     Tag::BlockQuote => {
                         in_block_quote = true;
+                        current_text.clear();
+                    }
+                    Tag::Table(_) => {
+                        in_table = true;
+                        tokens.push(MarkdownToken::Table);
+                    }
+                    Tag::TableHead => {
+                        in_table_head = true;
+                        tokens.push(MarkdownToken::TableHeader);
+                    }
+                    Tag::TableRow => {
+                        in_table_row = true;
+                        tokens.push(MarkdownToken::TableRow);
+                    }
+                    Tag::TableCell => {
+                        in_table_cell = true;
                         current_text.clear();
                     }
                     _ => {}
@@ -171,11 +195,27 @@ impl MarkdownParser {
                             in_block_quote = false;
                         }
                     }
+                    TagEnd::Table => {
+                        in_table = false;
+                    }
+                    TagEnd::TableHead => {
+                        in_table_head = false;
+                    }
+                    TagEnd::TableRow => {
+                        in_table_row = false;
+                    }
+                    TagEnd::TableCell => {
+                        if in_table_cell {
+                            tokens.push(MarkdownToken::TableCell(current_text.clone()));
+                            current_text.clear();
+                            in_table_cell = false;
+                        }
+                    }
                     _ => {}
                 },
                 Event::Text(text) => {
                     current_text.push_str(&text);
-                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote {
+                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote && !in_table_cell {
                         tokens.push(MarkdownToken::Text(text.to_string()));
                         current_text.clear();
                     }
@@ -220,6 +260,14 @@ impl MarkdownParser {
         let mut list_item_start = 0;
         let mut in_block_quote = false;
         let mut block_quote_start = 0;
+        let mut in_table = false;
+        let mut table_start = 0;
+        let mut in_table_head = false;
+        let mut table_head_start = 0;
+        let mut in_table_row = false;
+        let mut table_row_start = 0;
+        let mut in_table_cell = false;
+        let mut table_cell_start = 0;
         
         for (event, range) in offset_iter {
             match event {
@@ -262,6 +310,38 @@ impl MarkdownParser {
                 Event::Start(Tag::BlockQuote) => {
                     in_block_quote = true;
                     block_quote_start = range.start;
+                    current_text.clear();
+                }
+                Event::Start(Tag::Table(_)) => {
+                    in_table = true;
+                    table_start = range.start;
+                    tokens.push(ParsedToken {
+                        token_type: MarkdownToken::Table,
+                        start: range.start,
+                        end: range.end,
+                    });
+                }
+                Event::Start(Tag::TableHead) => {
+                    in_table_head = true;
+                    table_head_start = range.start;
+                    tokens.push(ParsedToken {
+                        token_type: MarkdownToken::TableHeader,
+                        start: range.start,
+                        end: range.end,
+                    });
+                }
+                Event::Start(Tag::TableRow) => {
+                    in_table_row = true;
+                    table_row_start = range.start;
+                    tokens.push(ParsedToken {
+                        token_type: MarkdownToken::TableRow,
+                        start: range.start,
+                        end: range.end,
+                    });
+                }
+                Event::Start(Tag::TableCell) => {
+                    in_table_cell = true;
+                    table_cell_start = range.start;
                     current_text.clear();
                 }
                 Event::End(TagEnd::Heading(_)) => {
@@ -353,8 +433,28 @@ impl MarkdownParser {
                         in_block_quote = false;
                     }
                 }
+                Event::End(TagEnd::Table) => {
+                    in_table = false;
+                }
+                Event::End(TagEnd::TableHead) => {
+                    in_table_head = false;
+                }
+                Event::End(TagEnd::TableRow) => {
+                    in_table_row = false;
+                }
+                Event::End(TagEnd::TableCell) => {
+                    if in_table_cell {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::TableCell(current_text.clone()),
+                            start: table_cell_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_table_cell = false;
+                    }
+                }
                 Event::Text(text) => {
-                    if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote {
+                    if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell {
                         current_text.push_str(&text);
                     }
                 }
@@ -907,5 +1007,50 @@ mod tests {
         // Should handle large changes gracefully and generate more tokens than initial
         assert!(tokens.len() > initial_tokens.len(), "Should have more tokens after large addition");
         assert!(tokens.len() > 5, "Should have multiple tokens from expanded document");
+    }
+
+    // TDD RED: First failing test for table parsing (ENG-153)
+    #[test]
+    fn test_parse_basic_table() {
+        let parser = MarkdownParser::new();
+        let markdown = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
+        let tokens = parser.parse(markdown);
+        
+        // Should find table-related tokens
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Table)));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableHeader)));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableRow)));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Header 1")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Cell 1")));
+    }
+
+    #[test]
+    fn test_parse_table_with_positions() {
+        let parser = MarkdownParser::new();
+        let markdown = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
+        let tokens = parser.parse_with_positions(markdown);
+        
+        // Should find table-related tokens with positions
+        let table_tokens: Vec<_> = tokens.iter().filter(|t| matches!(t.token_type, MarkdownToken::Table)).collect();
+        assert_eq!(table_tokens.len(), 1);
+        
+        let cell_tokens: Vec<_> = tokens.iter().filter(|t| matches!(t.token_type, MarkdownToken::TableCell(_))).collect();
+        assert!(cell_tokens.len() >= 4); // At least 2 header cells + 2 data cells
+        
+        // Verify position tracking works
+        assert!(cell_tokens.iter().all(|t| t.start < t.end));
+    }
+
+    #[test] 
+    fn test_parse_table_alignment() {
+        let parser = MarkdownParser::new();
+        let markdown = "| Left | Center | Right |\n|:-----|:------:|------:|\n| L1   | C1     | R1    |";
+        let tokens = parser.parse(markdown);
+        
+        // Should parse table with alignment markers
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Table)));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Left")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Center")));
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::TableCell(s) if s == "Right")));
     }
 }
