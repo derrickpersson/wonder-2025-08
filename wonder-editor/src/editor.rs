@@ -501,21 +501,6 @@ impl MarkdownEditor {
     pub fn document_mut(&mut self) -> &mut TextDocument {
         &mut self.document
     }
-
-    // ENG-151: Scroll event handling methods
-    pub fn get_scroll_offset(&self) -> f32 {
-        self.scroll_offset
-    }
-
-    pub fn handle_scroll_event(&mut self, _dx: f32, dy: f32) -> bool {
-        // Update scroll offset, applying bounds checking
-        let new_offset = self.scroll_offset + dy;
-        
-        // Simple bounds: don't scroll above 0, and for now allow unlimited downward scroll
-        self.scroll_offset = new_offset.max(0.0);
-        
-        true
-    }
 }
 
 impl Focusable for MarkdownEditor {
@@ -658,7 +643,6 @@ impl EntityInputHandler for MarkdownEditor {
         
         Some(absolute_position)
     }
-
 }
 
 // Custom element that handles text layout and input registration during paint phase
@@ -672,17 +656,8 @@ struct EditorElement {
     hybrid_renderer: HybridTextRenderer,
 }
 
-// Helper struct to track wrapped line information
-#[derive(Clone)]
-struct WrappedLineInfo {
-    shaped_line: ShapedLine,
-    original_line_index: usize,
-    char_start: usize, // Start position within the original line
-    char_end: usize,   // End position within the original line
-}
-
 impl Element for EditorElement {
-    type RequestLayoutState = Vec<WrappedLineInfo>;
+    type RequestLayoutState = Vec<ShapedLine>;
     type PrepaintState = ();
 
     fn id(&self) -> Option<gpui::ElementId> {
@@ -710,11 +685,11 @@ impl Element for EditorElement {
         let lines: Vec<&str> = text_to_display.lines().collect();
         let font_size = px(16.0);
 
-        let mut wrapped_line_infos = Vec::new();
+        let mut shaped_lines = Vec::new();
         let mut max_width = px(0.0);
         let mut current_offset = 0;
 
-        for (line_index, line) in lines.iter().enumerate() {
+        for line in lines {
             // Prepare line content for rendering - avoid string conversion for non-empty lines
 
             // Calculate cursor position for this line
@@ -752,9 +727,9 @@ impl Element for EditorElement {
             } else {
                 // For non-empty lines, use RopeSlice directly (no string conversion!)
                 (
-                    self.hybrid_renderer.get_display_content(*line, line_cursor_position, line_selection.clone()),
-                    self.hybrid_renderer.generate_styled_text_segments(*line, line_cursor_position, line_selection.clone()),
-                    self.hybrid_renderer.generate_mixed_text_runs(*line, line_cursor_position, line_selection)
+                    self.hybrid_renderer.get_display_content(line, line_cursor_position, line_selection.clone()),
+                    self.hybrid_renderer.generate_styled_text_segments(line, line_cursor_position, line_selection.clone()),
+                    self.hybrid_renderer.generate_mixed_text_runs(line, line_cursor_position, line_selection)
                 )
             };
 
@@ -781,34 +756,36 @@ impl Element for EditorElement {
                 line_runs
             };
 
-            // ENG-150: Add text wrapping at 500px width
-            let max_line_width = px(500.0);
-            
-            // COMPLETE FONT SIZE INTEGRATION - Multi-segment text shaping with wrapping
-            let line_shaped_lines = if !styled_segments.is_empty() {
+            // COMPLETE FONT SIZE INTEGRATION - Multi-segment text shaping
+            let shaped_line = if !styled_segments.is_empty() {
+                // Combine all segment text and text runs, but KEEP different font sizes
+                // TODO: GPUI limitation - shape_line only accepts one font_size parameter
+                // This is the core challenge: GPUI doesn't support mixed font sizes in a single call
+                
+                // For now, we can choose the approach:
+                // Option 1: Use the font size of the first segment
+                // Option 2: Use a weighted average font size  
+                // Option 3: Shape each segment separately (complex layout integration needed)
+                
                 let combined_text: String = styled_segments.iter().map(|s| s.text.as_str()).collect();
                 let combined_runs: Vec<_> = styled_segments.iter().map(|s| s.text_run.clone()).collect();
                 
                 // Use the first segment's font size as primary (H1 will dominate if present)
                 let primary_font_size = styled_segments.first().map(|s| px(s.font_size)).unwrap_or(font_size);
                 
-                // Wrap text at word boundaries if it exceeds max width
-                Self::wrap_text_line(window, combined_text, primary_font_size, &combined_runs, max_line_width)
+                window.text_system().shape_line(
+                    combined_text.into(),
+                    primary_font_size,
+                    &combined_runs,
+                    None
+                )
             } else {
-                // Fallback to current single-font-size approach with wrapping
-                Self::wrap_text_line(window, text_to_shape, font_size, &text_runs, max_line_width)
+                // Fallback to current single-font-size approach
+                window.text_system().shape_line(text_to_shape.into(), font_size, &text_runs, None)
             };
 
-            // Add all wrapped lines to wrapped_line_infos and update max_width
-            for (shaped_line, start_offset, end_offset) in line_shaped_lines {
-                max_width = max_width.max(shaped_line.width);
-                wrapped_line_infos.push(WrappedLineInfo {
-                    shaped_line,
-                    original_line_index: line_index,
-                    char_start: start_offset,
-                    char_end: end_offset,
-                });
-            }
+            max_width = max_width.max(shaped_line.width);
+            shaped_lines.push(shaped_line);
 
             // Update offset for next line (include newline character)
             current_offset += line.len() + 1;
@@ -835,18 +812,13 @@ impl Element for EditorElement {
                 window
                     .text_system()
                     .shape_line(" ".into(), font_size, &[text_run], None);
-            wrapped_line_infos.push(WrappedLineInfo {
-                shaped_line,
-                original_line_index: lines.len(),
-                char_start: 0,
-                char_end: 0,
-            });
+            shaped_lines.push(shaped_line);
         }
 
         // Calculate the size we need including padding
         let line_height = px(24.0);
         let padding = px(16.0);
-        let num_lines = wrapped_line_infos.len().max(1);
+        let num_lines = shaped_lines.len().max(1);
 
         let total_width = max_width + padding * 2.0;
         let total_height = (line_height * num_lines as f32) + padding * 2.0;
@@ -861,7 +833,7 @@ impl Element for EditorElement {
             _cx,
         );
 
-        (layout_id, wrapped_line_infos)
+        (layout_id, shaped_lines)
     }
 
     fn prepaint(
@@ -917,11 +889,11 @@ impl Element for EditorElement {
 
         // Paint selection first (behind text)
         if let Some(ref selection_range) = self.selection {
-            self.paint_selection_with_wrapping(bounds, shaped_lines, selection_range.clone(), window);
+            self.paint_selection(bounds, shaped_lines, selection_range.clone(), window);
         }
 
-        for wrapped_info in shaped_lines.iter_mut() {
-            wrapped_info.shaped_line
+        for shaped_line in shaped_lines.iter_mut() {
+            shaped_line
                 .paint(text_origin, line_height, window, cx)
                 .unwrap_or_else(|err| {
                     eprintln!("Failed to paint text line: {:?}", err);
@@ -939,152 +911,6 @@ impl Element for EditorElement {
 }
 
 impl EditorElement {
-    // New method that handles wrapped lines properly
-    fn paint_selection_with_wrapping(
-        &self,
-        bounds: Bounds<Pixels>,
-        wrapped_lines: &[WrappedLineInfo], 
-        selection_range: std::ops::Range<usize>,
-        window: &mut Window,
-    ) {
-        let padding = px(16.0);
-        let line_height = px(24.0);
-        let selection_color = gpui::Rgba {
-            r: 0.337,
-            g: 0.502,
-            b: 0.761,
-            a: 0.3,
-        };
-
-        let content = &self.content;
-        let lines: Vec<&str> = content.lines().collect();
-        let mut char_offset = 0;
-        let mut visual_line_index = 0;
-        
-        // Process each original line
-        for (original_line_index, line_text) in lines.iter().enumerate() {
-            let line_start = char_offset;
-            let line_end = char_offset + line_text.len();
-            
-            // Check if this line intersects with the selection
-            if selection_range.end > line_start && selection_range.start <= line_end {
-                // Calculate the selection bounds within this line (original coordinates)
-                let sel_start_in_line = selection_range.start.saturating_sub(line_start);
-                let sel_end_in_line = (selection_range.end.min(line_end) - line_start).min(line_text.len());
-                
-                if sel_start_in_line < sel_end_in_line {
-                    // Find all wrapped lines that belong to this original line
-                    for wrapped_info in wrapped_lines.iter().skip(visual_line_index) {
-                        if wrapped_info.original_line_index != original_line_index {
-                            break;
-                        }
-                        
-                        // Check if this wrapped line segment intersects with the selection
-                        let segment_start = wrapped_info.char_start;
-                        let segment_end = wrapped_info.char_end;
-                        
-                        if sel_end_in_line > segment_start && sel_start_in_line < segment_end {
-                            // Calculate selection bounds within this wrapped segment
-                            let seg_sel_start = sel_start_in_line.max(segment_start) - segment_start;
-                            let seg_sel_end = sel_end_in_line.min(segment_end) - segment_start;
-                            
-                            if seg_sel_start < seg_sel_end {
-                                // Extract the text for this segment to measure selection bounds
-                                let segment_text: String = line_text.chars()
-                                    .skip(segment_start)
-                                    .take(segment_end - segment_start)
-                                    .collect();
-                                    
-                                // Measure text up to selection start and end
-                                let text_before_sel: String = segment_text.chars().take(seg_sel_start).collect();
-                                let selected_text: String = segment_text.chars().skip(seg_sel_start).take(seg_sel_end - seg_sel_start).collect();
-                                
-                                let font_size = px(16.0);
-                                let text_run = gpui::TextRun {
-                                    len: segment_text.len(),
-                                    font: gpui::Font {
-                                        family: "SF Pro".into(),
-                                        features: gpui::FontFeatures::default(),
-                                        weight: gpui::FontWeight::NORMAL,
-                                        style: gpui::FontStyle::Normal,
-                                        fallbacks: None,
-                                    },
-                                    color: rgb(0xcdd6f4).into(),
-                                    background_color: None,
-                                    underline: None,
-                                    strikethrough: None,
-                                };
-                                
-                                // Measure positions
-                                let before_width = if text_before_sel.is_empty() {
-                                    px(0.0)
-                                } else {
-                                    window.text_system().shape_line(
-                                        text_before_sel.into(),
-                                        font_size,
-                                        &[text_run.clone()],
-                                        None
-                                    ).width
-                                };
-                                
-                                let selected_width = if selected_text.is_empty() {
-                                    px(0.0)
-                                } else {
-                                    window.text_system().shape_line(
-                                        selected_text.into(),
-                                        font_size,
-                                        &[text_run],
-                                        None
-                                    ).width
-                                };
-                                
-                                // Paint selection rectangle
-                                let selection_bounds = Bounds {
-                                    origin: gpui::point(
-                                        bounds.origin.x + padding + before_width,
-                                        bounds.origin.y + padding + (line_height * visual_line_index as f32)
-                                    ),
-                                    size: size(selected_width, line_height),
-                                };
-                                
-                                window.paint_quad(gpui::PaintQuad {
-                                    bounds: selection_bounds,
-                                    background: selection_color.into(),
-                                    border_widths: gpui::Edges::all(px(0.0)),
-                                    border_color: gpui::transparent_black().into(),
-                                    border_style: gpui::BorderStyle::Solid,
-                                    corner_radii: gpui::Corners::all(px(0.0)),
-                                });
-                            }
-                        }
-                        
-                        visual_line_index += 1;
-                    }
-                } else {
-                    // Skip wrapped lines for this original line since no selection
-                    for wrapped_info in wrapped_lines.iter().skip(visual_line_index) {
-                        if wrapped_info.original_line_index != original_line_index {
-                            break;
-                        }
-                        visual_line_index += 1;
-                    }
-                }
-            } else {
-                // Skip wrapped lines for this original line since no selection
-                for wrapped_info in wrapped_lines.iter().skip(visual_line_index) {
-                    if wrapped_info.original_line_index != original_line_index {
-                        break;
-                    }
-                    visual_line_index += 1;
-                }
-            }
-            
-            // Update char offset for next line (include newline character)  
-            char_offset += line_text.len() + 1;
-        }
-    }
-
-    // Legacy method for backward compatibility (not used with wrapping)
     fn paint_selection(
         &self,
         bounds: Bounds<Pixels>,
@@ -1457,7 +1283,7 @@ impl EditorElement {
             }
         };
 
-        // Create cursor bounds - a thin vertical line  
+        // Create cursor bounds - a thin vertical line
         let cursor_x = bounds.origin.x + padding + cursor_x_offset;
         let cursor_y = bounds.origin.y + padding + (line_height * line_number as f32);
 
@@ -1476,141 +1302,6 @@ impl EditorElement {
             border_style: gpui::BorderStyle::Solid,
             corner_radii: gpui::Corners::all(px(0.0)),
         });
-    }
-
-    // ENG-150: Text wrapping helper method
-    fn wrap_text_line(
-        window: &mut Window,
-        text: String,
-        font_size: Pixels,
-        text_runs: &[TextRun],
-        max_width: Pixels,
-    ) -> Vec<(ShapedLine, usize, usize)> { // Returns (ShapedLine, start_char_offset, end_char_offset)
-        // First, try shaping the full line to see if it fits
-        let full_shaped_line = window.text_system().shape_line(
-            text.clone().into(),
-            font_size,
-            text_runs,
-            None
-        );
-
-        // If it fits within max width, return it as-is
-        if full_shaped_line.width <= max_width {
-            return vec![(full_shaped_line, 0, text.chars().count())];
-        }
-
-        // Need to wrap - split at word boundaries
-        let mut wrapped_lines = Vec::new();
-        let mut current_text = String::new();
-        let mut current_char_start = 0;
-        let mut char_position = 0;
-        let text_chars: Vec<char> = text.chars().collect();
-        
-        // Split by words while tracking character positions
-        let mut word_start = 0;
-        let mut i = 0;
-        
-        while i <= text_chars.len() {
-            // Find the end of current word (or end of text)
-            let word_end = if i == text_chars.len() {
-                i
-            } else {
-                // Find next whitespace or end
-                let mut j = i;
-                while j < text_chars.len() && !text_chars[j].is_whitespace() {
-                    j += 1;
-                }
-                j
-            };
-            
-            if word_end > word_start {
-                // Extract word
-                let word: String = text_chars[word_start..word_end].iter().collect();
-                
-                let test_text = if current_text.is_empty() {
-                    word.clone()
-                } else {
-                    format!("{} {}", current_text, word)
-                };
-
-                // Test if adding this word would exceed max width
-                let test_shaped = window.text_system().shape_line(
-                    test_text.clone().into(),
-                    font_size,
-                    text_runs,
-                    None
-                );
-
-                if test_shaped.width <= max_width {
-                    // Word fits, add it to current line
-                    current_text = test_text;
-                    char_position = word_end;
-                } else {
-                    // Word doesn't fit, wrap current line if not empty
-                    if !current_text.is_empty() {
-                        let shaped_line = window.text_system().shape_line(
-                            current_text.clone().into(),
-                            font_size,
-                            text_runs,
-                            None
-                        );
-                        wrapped_lines.push((shaped_line, current_char_start, char_position));
-                        current_text = word.clone();
-                        current_char_start = word_start;
-                        char_position = word_end;
-                    } else {
-                        // Single word is too long, force it on a line by itself
-                        let shaped_line = window.text_system().shape_line(
-                            word.clone().into(),
-                            font_size,
-                            text_runs,
-                            None
-                        );
-                        wrapped_lines.push((shaped_line, word_start, word_end));
-                        current_char_start = word_end;
-                        char_position = word_end;
-                    }
-                }
-            }
-            
-            // Skip whitespace
-            while i < text_chars.len() && text_chars[i].is_whitespace() {
-                i += 1;
-            }
-            word_start = i;
-            i = word_start;
-            
-            // If we're at the end, break
-            if word_start >= text_chars.len() {
-                break;
-            }
-            
-            i = word_start + 1;
-        }
-
-        // Add the last line if not empty
-        if !current_text.is_empty() {
-            let shaped_line = window.text_system().shape_line(
-                current_text.into(),
-                font_size,
-                text_runs,
-                None
-            );
-            wrapped_lines.push((shaped_line, current_char_start, char_position));
-        }
-
-        // If no wrapped lines (empty text), return one empty line
-        if wrapped_lines.is_empty() {
-            let empty_shaped = window.text_system().shape_line(
-                " ".into(),
-                font_size,
-                text_runs,
-                None
-            );
-            wrapped_lines.push((empty_shaped, 0, 1));
-        }
-
-        wrapped_lines
     }
 }
 
@@ -1682,8 +1373,8 @@ impl Render for MarkdownEditor {
                     ),
             )
             .child(
-                // Main content area with hybrid editor - now scrollable!
-                div().flex_1().w_full().p_4().id("editor-scroll").overflow_scroll().child(
+                // Main content area with hybrid editor
+                div().flex_1().w_full().p_4().child(
                     // Use EditorElement with hybrid rendering capabilities - USE THE EDITOR'S RENDERER
                     EditorElement {
                         editor: cx.entity().clone(),
