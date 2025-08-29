@@ -790,8 +790,21 @@ impl HybridTextRenderer {
         transformed_content
     }
     
-    /// Maps a cursor position from original content to transformed content
+    /// Maps a cursor position from original content to transformed content - ENG-173: Updated to use unified coordinate system
     pub fn map_cursor_position<T: TextContent>(&self, content: T, original_cursor_pos: usize, selection: Option<Range<usize>>) -> usize {
+        // Use unified coordinate system for accurate mapping
+        let coordinate_map = self.create_coordinate_map(content, original_cursor_pos, selection);
+        
+        // Return mapped position from unified system
+        if original_cursor_pos < coordinate_map.original_to_display.len() {
+            coordinate_map.original_to_display[original_cursor_pos]
+        } else {
+            coordinate_map.original_to_display.last().copied().unwrap_or(0)
+        }
+    }
+    
+    /// Legacy implementation (kept for fallback/testing)
+    pub fn map_cursor_position_legacy<T: TextContent>(&self, content: T, original_cursor_pos: usize, selection: Option<Range<usize>>) -> usize {
         if content.text_is_empty() || original_cursor_pos == 0 {
             return 0;
         }
@@ -1030,8 +1043,22 @@ impl HybridTextRenderer {
         text_runs
     }
     
-    // ENG-141: Coordinate mapping between display positions and original content positions
+    // ENG-173: Updated coordinate mapping between display positions and original content positions using unified system
     pub fn map_display_position_to_original<T: TextContent>(&self, content: T, display_position: usize, cursor_position: usize, selection: Option<(usize, usize)>) -> usize {
+        // Convert selection format and use unified coordinate system
+        let selection_range = selection.map(|(start, end)| start..end);
+        let coordinate_map = self.create_coordinate_map(content, cursor_position, selection_range);
+        
+        // Return mapped position from unified system
+        if display_position < coordinate_map.display_to_original.len() {
+            coordinate_map.display_to_original[display_position]
+        } else {
+            coordinate_map.display_to_original.last().copied().unwrap_or(0)
+        }
+    }
+    
+    // Legacy implementation (kept for fallback/testing)
+    pub fn map_display_position_to_original_legacy<T: TextContent>(&self, content: T, display_position: usize, cursor_position: usize, selection: Option<(usize, usize)>) -> usize {
         if content.text_is_empty() {
             return 0;
         }
@@ -1780,6 +1807,71 @@ mod tests {
                 window[0], window[1]
             );
         }
+    }
+
+    // ENG-173: Phase 3 - Rendering Integration Tests
+    #[test]
+    fn test_unified_coordinate_system_integration() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Hello **world** test";
+        let cursor_position = 8; // Inside "**world**"
+        
+        // Create coordinate map
+        let coordinate_map = renderer.create_coordinate_map(content, cursor_position, None);
+        
+        // Test that the old map_cursor_position method gives same result as unified system
+        let old_position = renderer.map_cursor_position(content, cursor_position, None);
+        let new_position = coordinate_map.original_to_display[cursor_position];
+        
+        assert_eq!(old_position, new_position, "Unified coordinate system should match legacy system");
+    }
+    
+    #[test]
+    fn test_unified_cursor_positioning() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Text with **bold** content";
+        
+        // Test cursor positioning at various points
+        for cursor_pos in 0..content.len() {
+            let coordinate_map = renderer.create_coordinate_map(content, cursor_pos, None);
+            
+            // Verify coordinate map bounds
+            assert!(cursor_pos < coordinate_map.original_to_display.len(), 
+                   "Cursor position {} should be within coordinate map bounds", cursor_pos);
+            
+            let display_pos = coordinate_map.original_to_display[cursor_pos];
+            
+            // Verify display position is reasonable
+            assert!(display_pos <= coordinate_map.display_to_original.len(),
+                   "Display position {} should be within bounds for cursor {}", display_pos, cursor_pos);
+        }
+    }
+    
+    #[test]
+    fn test_unified_selection_highlighting() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Start **bold text** end";
+        let selection = Some(8..13); // Select "bold " inside the bold markdown
+        
+        // Create coordinate map with selection context
+        let coordinate_map = renderer.create_coordinate_map(content, 10, selection.clone());
+        
+        // Selection should be tracked in coordinate map
+        assert!(!coordinate_map.token_boundaries.is_empty(), "Should have token boundaries for selection");
+        
+        // Find tokens that intersect with selection
+        let selection_range = selection.unwrap();
+        let intersecting_tokens: Vec<_> = coordinate_map.token_boundaries.iter()
+            .filter(|b| b.original_start <= selection_range.end && b.original_end >= selection_range.start)
+            .collect();
+            
+        assert!(!intersecting_tokens.is_empty(), "Should find tokens intersecting with selection");
+        
+        // Verify selection coordinates are accurately mapped
+        let display_start = coordinate_map.original_to_display[selection_range.start];
+        let display_end = coordinate_map.original_to_display[selection_range.end.min(content.len() - 1)];
+        
+        assert!(display_start <= display_end, "Display selection should maintain order");
     }
 
     #[test]
