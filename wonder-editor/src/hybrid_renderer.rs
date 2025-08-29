@@ -50,6 +50,17 @@ pub struct StyleContext {
     pub border_color: Hsla,
 }
 
+// ENG-168: Typography style structure for mode-aware styling  
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeadingTypographyStyle {
+    pub font_weight: FontWeight,
+    pub font_style: FontStyle,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub color: Hsla,
+    pub font_family: String,
+}
+
 // ENG-167: Hybrid layout element types
 pub enum HybridLayoutElement {
     Div {
@@ -403,14 +414,15 @@ impl HybridTextRenderer {
     }
 
     pub fn get_scalable_font_size_for_heading_level(&self, level: u32, buffer_font_size: f32) -> f32 {
+        // ENG-168: Implement typography hierarchy
         let rem_factor = match level {
-            1 => 1.5,   // H1 - 1.5x buffer font size (was 24px at 16px base)
-            2 => 1.25,  // H2 - 1.25x buffer font size (was 20px at 16px base)
-            3 => 1.125, // H3 - 1.125x buffer font size (was 18px at 16px base)
-            4 => 1.0625, // H4 - 1.0625x buffer font size (was 17px at 16px base)
-            5 => 1.0,   // H5 - 1x buffer font size (was 16px at 16px base)
-            6 => 0.9375, // H6 - 0.9375x buffer font size (was 15px at 16px base)
-            _ => 1.0,   // Default for invalid levels
+            1 => 2.0,    // H1 - 2x buffer font size
+            2 => 1.5,    // H2 - 1.5x buffer font size
+            3 => 1.25,   // H3 - 1.25x buffer font size
+            4 => 1.0,    // H4 - 1x buffer font size
+            5 => 0.875,  // H5 - 0.875x buffer font size
+            6 => 0.85,   // H6 - 0.85x buffer font size
+            _ => 1.0,    // Default for invalid levels
         };
         self.scaled_rems(rem_factor, buffer_font_size)
     }
@@ -421,6 +433,49 @@ impl HybridTextRenderer {
 
     pub fn get_scalable_font_size_for_regular_text(&self, buffer_font_size: f32) -> f32 {
         self.scaled_rems(1.0, buffer_font_size) // 1x buffer font size
+    }
+    
+    // ENG-168: Add line height calculation (1.25x font size)
+    pub fn get_line_height_for_font_size(&self, font_size: f32) -> f32 {
+        font_size * 1.25
+    }
+    
+    // ENG-168: Typography style data structure for mode-aware styling
+    pub fn get_heading_typography_style(&self, token: &ParsedToken, is_preview_mode: bool, style_context: &StyleContext, buffer_font_size: f32) -> HeadingTypographyStyle {
+        if let MarkdownToken::Heading(level, _) = &token.token_type {
+            if is_preview_mode {
+                // Preview mode: styled headings with proper hierarchy
+                let font_size = self.get_scalable_font_size_for_heading_level(*level, buffer_font_size);
+                HeadingTypographyStyle {
+                    font_weight: FontWeight::BOLD,
+                    font_style: FontStyle::Normal,
+                    font_size,
+                    line_height: self.get_line_height_for_font_size(font_size),
+                    color: style_context.text_color,
+                    font_family: "SF Pro".to_string(),
+                }
+            } else {
+                // Raw mode: show markdown syntax with normal styling
+                HeadingTypographyStyle {
+                    font_weight: FontWeight::NORMAL,
+                    font_style: FontStyle::Normal, 
+                    font_size: buffer_font_size,
+                    line_height: self.get_line_height_for_font_size(buffer_font_size),
+                    color: style_context.text_color,
+                    font_family: "SF Pro".to_string(),
+                }
+            }
+        } else {
+            // Default styling for non-heading tokens
+            HeadingTypographyStyle {
+                font_weight: FontWeight::NORMAL,
+                font_style: FontStyle::Normal,
+                font_size: buffer_font_size,
+                line_height: self.get_line_height_for_font_size(buffer_font_size),
+                color: style_context.text_color,
+                font_family: "SF Pro".to_string(),
+            }
+        }
     }
 
     // TDD GREEN: Implement div-based layout system methods (ENG-167)
@@ -1644,14 +1699,14 @@ mod tests {
             start: 0,
             end: 7,
         };
-        assert_eq!(renderer.get_font_size_for_token(&h1_token, 16.0), 24.0);
+        assert_eq!(renderer.get_font_size_for_token(&h1_token, 16.0), 32.0); // H1 is now 2x (32.0)
         
         let h3_token = ParsedToken {
             token_type: MarkdownToken::Heading(3, "Subtitle".to_string()),
             start: 0,
             end: 11,
         };
-        assert_eq!(renderer.get_font_size_for_token(&h3_token, 16.0), 18.0);
+        assert_eq!(renderer.get_font_size_for_token(&h3_token, 16.0), 20.0); // H3 is now 1.25x (20.0)
         
         // Test other token types
         let bold_token = ParsedToken {
@@ -2068,18 +2123,18 @@ mod tests {
     fn test_heading_sizes_scale_with_buffer_font() {
         let renderer = HybridTextRenderer::new();
         
-        // Test H1 scaling (should be 1.5x buffer font size)
-        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 16.0), 24.0);
-        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 20.0), 30.0);
-        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 12.0), 18.0);
+        // Test H1 scaling (should be 2x buffer font size with new typography hierarchy)
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 16.0), 32.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 20.0), 40.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 12.0), 24.0);
         
-        // Test H2 scaling (should be 1.25x buffer font size) 
-        assert_eq!(renderer.get_scalable_font_size_for_heading_level(2, 16.0), 20.0);
-        assert_eq!(renderer.get_scalable_font_size_for_heading_level(2, 20.0), 25.0);
+        // Test H2 scaling (should be 1.5x buffer font size with new typography hierarchy) 
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(2, 16.0), 24.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(2, 20.0), 30.0);
         
-        // Test body text (should be 1x buffer font size)
-        assert_eq!(renderer.get_scalable_font_size_for_heading_level(5, 16.0), 16.0);
-        assert_eq!(renderer.get_scalable_font_size_for_heading_level(5, 20.0), 20.0);
+        // Test H5 (should be 0.875x buffer font size with new typography hierarchy)
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(5, 16.0), 14.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(5, 20.0), 17.5);
     }
 
     #[test]
@@ -2090,6 +2145,55 @@ mod tests {
         assert_eq!(renderer.get_scalable_font_size_for_code(16.0), 14.0);
         assert_eq!(renderer.get_scalable_font_size_for_code(20.0), 17.5);
         assert_eq!(renderer.get_scalable_font_size_for_code(12.0), 10.5);
+    }
+
+    // ENG-168: TDD RED: Test typography hierarchy
+    #[test]
+    fn test_typography_hierarchy_ratios() {
+        let renderer = HybridTextRenderer::new();
+        let buffer_font_size = 16.0;
+        
+        // Test heading size ratios: H1: 2x, H2: 1.5x, H3: 1.25x, H4: 1x, H5: 0.875x, H6: 0.85x
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, buffer_font_size), 32.0, "H1 should be 2x buffer font size");
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(2, buffer_font_size), 24.0, "H2 should be 1.5x buffer font size");
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(3, buffer_font_size), 20.0, "H3 should be 1.25x buffer font size");
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(4, buffer_font_size), 16.0, "H4 should be 1x buffer font size");
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(5, buffer_font_size), 14.0, "H5 should be 0.875x buffer font size");
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(6, buffer_font_size), 13.6, "H6 should be 0.85x buffer font size");
+    }
+    
+    #[test]
+    fn test_line_height_calculation() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Test line height is 1.25x font size
+        assert_eq!(renderer.get_line_height_for_font_size(16.0), 20.0, "Line height should be 1.25x font size");
+        assert_eq!(renderer.get_line_height_for_font_size(24.0), 30.0, "Line height should be 1.25x font size for larger fonts");
+        assert_eq!(renderer.get_line_height_for_font_size(32.0), 40.0, "Line height should be 1.25x font size for H1");
+    }
+    
+    #[test]
+    fn test_heading_font_weights_and_styles() {
+        let renderer = HybridTextRenderer::new();
+        let style_context = StyleContext::new_for_test();
+        
+        // Test that headings get proper font weights (bold) in both modes
+        let h1_token = ParsedToken {
+            token_type: MarkdownToken::Heading(1, "Title".to_string()),
+            start: 0,
+            end: 7,
+        };
+        
+        // Test preview mode styling
+        let preview_styling = renderer.get_heading_typography_style(&h1_token, true, &style_context, 16.0);
+        assert_eq!(preview_styling.font_weight, FontWeight::BOLD);
+        assert_eq!(preview_styling.font_size, 32.0); // 2x buffer font size
+        assert_eq!(preview_styling.line_height, 40.0); // 1.25x font size
+        
+        // Test raw mode styling  
+        let raw_styling = renderer.get_heading_typography_style(&h1_token, false, &style_context, 16.0);
+        assert_eq!(raw_styling.font_weight, FontWeight::NORMAL); // Raw mode shows markdown syntax, normal weight
+        assert_eq!(raw_styling.font_size, 16.0); // Buffer font size for raw text
     }
 
     // TDD RED: Test div-based layout system (ENG-167)
