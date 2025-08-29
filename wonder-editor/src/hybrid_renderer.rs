@@ -173,24 +173,151 @@ impl HybridTextRenderer {
         }
     }
 
-    // ENG-173: Phase 1 - Create unified coordinate mapping system
+    // ENG-173: Phase 2 - Create unified coordinate mapping system with token boundary tracking
     pub fn create_coordinate_map<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>) -> CoordinateMap {
         let content_str = content.text_to_string();
-        let content_chars: Vec<char> = content_str.chars().collect();
+        let selection_range = selection;
         
-        // Build simpler coordinate mapping first
+        // Get tokens and their render modes
+        let token_modes = self.render_document(&content_str, cursor_position, selection_range);
+        
+        // Initialize coordinate mapping structures
         let mut original_to_display = Vec::new();
         let mut display_to_original = Vec::new();
-        let token_boundaries = Vec::new(); // For now, keep empty
-        let line_offsets = Vec::new(); // For now, keep empty
+        let mut token_boundaries = Vec::new();
+        let mut line_offsets = Vec::new();
         
-        // For minimal implementation - just direct mapping for now
-        // This will make the first test pass
-        for i in 0..=content_chars.len() {
-            original_to_display.push(i);
-            if i < content_chars.len() {
-                display_to_original.push(i);
+        // Pre-size the original_to_display vector
+        let content_len = content_str.chars().count();
+        original_to_display.resize(content_len + 1, 0);
+        
+        // Track positions
+        let mut display_pos = 0;
+        let mut original_pos = 0;
+        
+        // Track line offsets
+        let mut current_line = 0;
+        line_offsets.push(LineOffset {
+            line_number: current_line,
+            original_offset: 0,
+            display_offset: 0,
+        });
+        
+        // Sort tokens by start position
+        let mut sorted_tokens: Vec<_> = token_modes.iter().collect();
+        sorted_tokens.sort_by_key(|(token, _)| token.start);
+        
+        // Process each character and token
+        for (token, mode) in sorted_tokens {
+            // Handle text before this token
+            while original_pos < token.start {
+                // Map plain text directly
+                original_to_display[original_pos] = display_pos;
+                display_to_original.push(original_pos);
+                
+                // Check for newlines
+                if let Some(ch) = content_str.chars().nth(original_pos) {
+                    if ch == '\n' {
+                        current_line += 1;
+                        line_offsets.push(LineOffset {
+                            line_number: current_line,
+                            original_offset: original_pos + 1,
+                            display_offset: display_pos + 1,
+                        });
+                    }
+                }
+                
+                display_pos += 1;
+                original_pos += 1;
             }
+            
+            // Process the token
+            let display_start = display_pos;
+            let original_text = &content_str[token.start..token.end];
+            
+            // Determine display text based on render mode
+            let display_text = match mode {
+                TokenRenderMode::Raw => {
+                    // Raw mode: show original markdown
+                    original_text.to_string()
+                }
+                TokenRenderMode::Preview => {
+                    // Preview mode: show transformed content
+                    match &token.token_type {
+                        MarkdownToken::Bold(inner) => inner.clone(),
+                        MarkdownToken::Italic(inner) => inner.clone(),
+                        MarkdownToken::Code(inner) => inner.clone(),
+                        MarkdownToken::Heading(_, inner) => inner.clone(),
+                        MarkdownToken::Tag(tag_content) => format!("#{}", tag_content),
+                        MarkdownToken::Highlight(content) => content.clone(),
+                        MarkdownToken::Emoji(content) => content.clone(),
+                        MarkdownToken::Html(content) => content.clone(),
+                        MarkdownToken::Subscript(content) => content.clone(),
+                        MarkdownToken::Superscript(content) => content.clone(),
+                        _ => original_text.to_string(),
+                    }
+                }
+            };
+            
+            // Map positions within the token
+            let display_chars = display_text.chars().count();
+            
+            // For tokens in preview mode, all original positions within the token
+            // map to the start of the display text (simplified for now)
+            for i in token.start..token.end {
+                if i < original_to_display.len() {
+                    // Map to proportional position in display text
+                    let progress = (i - token.start) as f32 / (token.end - token.start) as f32;
+                    let display_offset = (progress * display_chars as f32) as usize;
+                    original_to_display[i] = display_start + display_offset.min(display_chars.saturating_sub(1));
+                }
+            }
+            
+            // Map display positions back to original
+            for _ in 0..display_chars {
+                display_to_original.push(token.start);
+            }
+            
+            // Record token boundary
+            let display_end = display_start + display_chars;
+            token_boundaries.push(TokenBoundary {
+                original_start: token.start,
+                original_end: token.end,
+                display_start,
+                display_end,
+                token_type: token.token_type.clone(),
+                render_mode: mode.clone(),
+            });
+            
+            // Update positions
+            display_pos = display_end;
+            original_pos = token.end;
+        }
+        
+        // Handle remaining text after last token
+        while original_pos < content_len {
+            original_to_display[original_pos] = display_pos;
+            display_to_original.push(original_pos);
+            
+            // Check for newlines
+            if let Some(ch) = content_str.chars().nth(original_pos) {
+                if ch == '\n' {
+                    current_line += 1;
+                    line_offsets.push(LineOffset {
+                        line_number: current_line,
+                        original_offset: original_pos + 1,
+                        display_offset: display_pos + 1,
+                    });
+                }
+            }
+            
+            display_pos += 1;
+            original_pos += 1;
+        }
+        
+        // Map the final position
+        if original_pos == content_len && original_pos < original_to_display.len() {
+            original_to_display[original_pos] = display_pos;
         }
         
         CoordinateMap {
@@ -1607,6 +1734,8 @@ mod tests {
         // Should have token boundaries for the bold markdown
         assert!(!coordinate_map.token_boundaries.is_empty(), "Should track token boundaries");
         
+        // Verify we found token boundaries
+        
         // Find the bold token boundary
         let bold_boundary = coordinate_map.token_boundaries.iter()
             .find(|b| matches!(b.token_type, MarkdownToken::Bold(_)))
@@ -1614,7 +1743,7 @@ mod tests {
             
         // Verify boundary positions are correct
         assert_eq!(bold_boundary.original_start, 6, "Bold should start at position 6 ('**bold')");
-        assert_eq!(bold_boundary.original_end, 18, "Bold should end at position 18 (after 'text**')");
+        assert_eq!(bold_boundary.original_end, 19, "Bold should end at position 19 (after 'text**')");
         
         // In preview mode, display should be shorter (no markdown chars)
         assert_eq!(bold_boundary.display_start, 6, "Display start should be 6 ('Start ')");
