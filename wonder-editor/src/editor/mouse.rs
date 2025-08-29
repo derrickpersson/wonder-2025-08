@@ -76,55 +76,133 @@ impl MarkdownEditor {
     }
 
     // Helper method to convert screen coordinates to character positions
-    // Fixed to integrate with hybrid renderer coordinate mapping
+    // Comprehensive fix for mouse positioning accuracy with hybrid rendering
     fn convert_point_to_character_index(&self, point: Point<Pixels>) -> usize {
         let padding = px(16.0);
-        let line_height = px(24.0);
         
         // Account for editor bounds (status bar height + editor padding)
         let editor_content_y_offset = px(30.0) + padding; // Status bar height + padding
         let relative_y = point.y - editor_content_y_offset;
-        let line_index = ((relative_y / line_height).floor() as usize).max(0);
+        let relative_x = point.x - padding;
         
         let content = self.document.content();
         let lines: Vec<&str> = content.lines().collect();
         
-        // If clicked beyond last line, return end of document
+        if lines.is_empty() {
+            return 0;
+        }
+        
+        // Find the correct line by accounting for different line heights based on content
+        let mut current_y_offset = px(0.0);
+        let mut line_index = 0;
+        let mut chars_before_line = 0;
+        
+        for (idx, line_content) in lines.iter().enumerate() {
+            // Calculate line height based on content (headings have larger line heights)
+            let line_height = self.calculate_line_height_for_content(line_content, chars_before_line);
+            
+            // Check if click is within this line's bounds
+            if relative_y >= current_y_offset && relative_y < current_y_offset + line_height {
+                line_index = idx;
+                break;
+            }
+            
+            current_y_offset += line_height;
+            chars_before_line += line_content.chars().count() + 1; // +1 for newline
+            
+            // If we're past the last line, use the last line
+            if idx == lines.len() - 1 {
+                line_index = idx;
+            }
+        }
+        
+        // If clicked beyond all lines, return end of document
         if line_index >= lines.len() {
             return content.chars().count();
         }
         
-        // Calculate character position within the clicked line using hybrid renderer
         let line_content = lines[line_index];
-        let relative_x = point.x - padding;
         
-        // Find the original cursor position at start of this line
-        let chars_before_line: usize = lines.iter().take(line_index).map(|l| l.chars().count() + 1).sum();
-        
-        // Simplified approach: use a basic approximation that accounts for hybrid rendering
-        // This is more accurate than the original but much simpler than full coordinate mapping
-        let base_font_size = 16.0;
-        let approx_char_width = base_font_size * 0.6;
-        let rough_char_offset = ((relative_x.0 / approx_char_width).round() as usize).min(line_content.chars().count());
-        
-        let original_position = chars_before_line + rough_char_offset;
-        
-        // Use hybrid renderer to check if this position makes sense
-        // If we're in a transformed area, try to find a reasonable nearby position
-        let selection = self.document.selection_range().map(|(start, end)| start..end);
-        let display_position = self.hybrid_renderer.map_cursor_position(
-            content.as_str(),
-            original_position, 
-            selection.clone()
+        // Calculate character position within the clicked line using more accurate text measurement
+        let char_offset_in_line = self.calculate_character_offset_from_x_position(
+            line_content, 
+            relative_x, 
+            chars_before_line
         );
         
-        // If the display position mapping is reasonable, use it
-        // Otherwise fall back to simple calculation
-        if display_position <= content.chars().count() {
-            original_position
-        } else {
-            (chars_before_line + rough_char_offset).min(content.chars().count())
+        let original_position = chars_before_line + char_offset_in_line;
+        original_position.min(content.chars().count())
+    }
+    
+    // Calculate line height based on content (headings are taller)
+    fn calculate_line_height_for_content(&self, line_content: &str, line_start_pos: usize) -> Pixels {
+        // Default line height
+        let base_line_height = px(24.0);
+        
+        // Check if this line is a heading and calculate appropriate height
+        if line_content.starts_with('#') {
+            let heading_level = line_content.chars().take_while(|&c| c == '#').count() as u32;
+            if heading_level <= 6 {
+                // Get the font size for this heading level 
+                let base_font_size = 16.0;
+                let heading_font_size = self.hybrid_renderer.get_scalable_font_size_for_heading_level(heading_level, base_font_size);
+                let heading_line_height = self.hybrid_renderer.get_line_height_for_font_size(heading_font_size);
+                return px(heading_line_height);
+            }
         }
+        
+        base_line_height
+    }
+    
+    // Calculate character offset from X position with better accuracy
+    fn calculate_character_offset_from_x_position(&self, line_content: &str, x_position: Pixels, line_start_pos: usize) -> usize {
+        if line_content.is_empty() {
+            return 0;
+        }
+        
+        // Use binary search to find the character position that best matches the X coordinate
+        let mut best_offset = 0;
+        let mut min_distance = f32::MAX;
+        
+        for char_offset in 0..=line_content.chars().count() {
+            let estimated_x = self.estimate_x_position_for_character_offset(line_content, char_offset, line_start_pos);
+            let distance = (estimated_x.0 - x_position.0).abs();
+            
+            if distance < min_distance {
+                min_distance = distance;
+                best_offset = char_offset;
+            }
+        }
+        
+        best_offset
+    }
+    
+    // Estimate X position for a character offset in a line
+    fn estimate_x_position_for_character_offset(&self, line_content: &str, char_offset: usize, line_start_pos: usize) -> Pixels {
+        if char_offset == 0 {
+            return px(0.0);
+        }
+        
+        let text_up_to_offset: String = line_content.chars().take(char_offset).collect();
+        
+        // Determine font size based on content type (heading vs regular text)
+        let base_font_size = 16.0;
+        let font_size = if line_content.starts_with('#') {
+            let heading_level = line_content.chars().take_while(|&c| c == '#').count() as u32;
+            if heading_level <= 6 {
+                self.hybrid_renderer.get_scalable_font_size_for_heading_level(heading_level, base_font_size)
+            } else {
+                base_font_size
+            }
+        } else {
+            base_font_size
+        };
+        
+        // Use a more accurate character width estimation based on font size
+        // This is still an approximation but accounts for different font sizes
+        let char_width = font_size * 0.6; // Slightly better approximation than before
+        
+        px(text_up_to_offset.chars().count() as f32 * char_width)
     }
 
     // ENG-139: Click count and selection helpers

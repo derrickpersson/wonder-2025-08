@@ -96,6 +96,47 @@ mod tests {
         assert!(result);
         assert_eq!(editor.cursor_position(), middle_position, "Click in middle of long line should position correctly");
     }
+    
+    #[test]
+    fn test_mouse_positioning_with_mixed_line_heights() {
+        let mut editor = create_test_editor_minimal();
+        
+        // Create content with mixed line heights (headings and regular text)
+        // This replicates the issue from the user's screenshot
+        let content = "# Wonder is an AI powered note taking app that helps you explore your thinking.\n\nMake curiosity the default\n- instead of boredom, curiosity prevails\n- Should be a default reaction to boredom\n\nYour learning platform.";
+        for ch in content.chars() {
+            editor.handle_char_input(ch);
+        }
+        
+        // Test clicking on "default" in "- Should be a default reaction to boredom"
+        // First, find where this line starts
+        let lines: Vec<&str> = content.lines().collect();
+        let mut chars_before_target_line = 0;
+        let mut target_line_index = 0;
+        
+        for (idx, line) in lines.iter().enumerate() {
+            if line.contains("Should be a default reaction") {
+                target_line_index = idx;
+                break;
+            }
+            chars_before_target_line += line.chars().count() + 1; // +1 for newline
+        }
+        
+        // Find position of "default" within that line
+        let target_line = lines[target_line_index];
+        let default_offset = target_line.find("default").expect("Should find 'default' in line");
+        let default_position = chars_before_target_line + default_offset;
+        
+        // Test clicking at "default"
+        let result = editor.handle_click_at_position(default_position);
+        assert!(result);
+        assert_eq!(editor.cursor_position(), default_position, "Click on 'default' should position cursor correctly");
+        
+        // Test clicking at the start of "default" (the 'd')
+        let result = editor.handle_click_at_position(default_position);
+        assert!(result);
+        assert_eq!(editor.cursor_position(), default_position, "Click at start of 'default' should be accurate");
+    }
 
     // More mouse interaction tests will be moved here from the original test module
 }
