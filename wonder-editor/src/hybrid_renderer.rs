@@ -140,19 +140,46 @@ impl HybridTextRenderer {
     pub fn get_font_size_for_regular_text(&self) -> f32 {
         16.0 // Standard body text size
     }
+
+    // TDD GREEN: Implement scalable rem-based sizing system (ENG-166)
+    pub fn scaled_rems(&self, rem_factor: f32, buffer_font_size: f32) -> f32 {
+        rem_factor * buffer_font_size
+    }
+
+    pub fn get_scalable_font_size_for_heading_level(&self, level: u32, buffer_font_size: f32) -> f32 {
+        let rem_factor = match level {
+            1 => 1.5,   // H1 - 1.5x buffer font size (was 24px at 16px base)
+            2 => 1.25,  // H2 - 1.25x buffer font size (was 20px at 16px base)
+            3 => 1.125, // H3 - 1.125x buffer font size (was 18px at 16px base)
+            4 => 1.0625, // H4 - 1.0625x buffer font size (was 17px at 16px base)
+            5 => 1.0,   // H5 - 1x buffer font size (was 16px at 16px base)
+            6 => 0.9375, // H6 - 0.9375x buffer font size (was 15px at 16px base)
+            _ => 1.0,   // Default for invalid levels
+        };
+        self.scaled_rems(rem_factor, buffer_font_size)
+    }
+
+    pub fn get_scalable_font_size_for_code(&self, buffer_font_size: f32) -> f32 {
+        self.scaled_rems(0.875, buffer_font_size) // 0.875x buffer font size (was 14px at 16px base)
+    }
+
+    pub fn get_scalable_font_size_for_regular_text(&self, buffer_font_size: f32) -> f32 {
+        self.scaled_rems(1.0, buffer_font_size) // 1x buffer font size
+    }
     
-    pub fn get_font_size_for_token(&self, token: &ParsedToken) -> f32 {
+    pub fn get_font_size_for_token(&self, token: &ParsedToken, buffer_font_size: f32) -> f32 {
         match &token.token_type {
-            MarkdownToken::Heading(level, _) => self.get_font_size_for_heading_level(*level),
-            MarkdownToken::Code(_) => self.get_font_size_for_code(),
+            MarkdownToken::Heading(level, _) => self.get_scalable_font_size_for_heading_level(*level, buffer_font_size),
+            MarkdownToken::Code(_) => self.get_scalable_font_size_for_code(buffer_font_size),
             MarkdownToken::Table | MarkdownToken::TableHeader | MarkdownToken::TableRow | MarkdownToken::TableCell(_) 
             | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) | MarkdownToken::Tag(_) | MarkdownToken::Highlight(_) | MarkdownToken::Emoji(_) 
-            | MarkdownToken::Html(_) | MarkdownToken::Subscript(_) | MarkdownToken::Superscript(_) => self.get_font_size_for_regular_text(),
-            _ => self.get_font_size_for_regular_text(),
+            | MarkdownToken::Html(_) => self.get_scalable_font_size_for_regular_text(buffer_font_size),
+            MarkdownToken::Subscript(_) | MarkdownToken::Superscript(_) => self.scaled_rems(0.8, buffer_font_size),
+            _ => self.get_scalable_font_size_for_regular_text(buffer_font_size),
         }
     }
     
-    pub fn generate_styled_text_segments_with_context<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>, style_context: &StyleContext) -> Vec<StyledTextSegment> {
+    pub fn generate_styled_text_segments_with_context<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>, style_context: &StyleContext, buffer_font_size: f32) -> Vec<StyledTextSegment> {
         if content.text_is_empty() {
             return vec![];
         }
@@ -201,42 +228,42 @@ impl HybridTextRenderer {
                     // Preview mode: show transformed content with appropriate styling and font size
                     match &token.token_type {
                         MarkdownToken::Bold(inner_content) => {
-                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_scalable_font_size_for_regular_text(buffer_font_size))
                         }
                         MarkdownToken::Italic(inner_content) => {
-                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, style_context.text_color, "SF Pro", self.get_scalable_font_size_for_regular_text(buffer_font_size))
                         }
                         MarkdownToken::Heading(level, content) => {
-                            (content.clone(), FontWeight::BOLD, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_heading_level(*level))
+                            (content.clone(), FontWeight::BOLD, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_scalable_font_size_for_heading_level(*level, buffer_font_size))
                         }
                         MarkdownToken::Code(inner_content) => {
-                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.code_color, "monospace", self.get_font_size_for_code())
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.code_color, "monospace", self.get_scalable_font_size_for_code(buffer_font_size))
                         }
                         MarkdownToken::Tag(tag_content) => {
-                            (format!("#{}", tag_content), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                            (format!("#{}", tag_content), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_scalable_font_size_for_regular_text(buffer_font_size))
                         }
                         MarkdownToken::Highlight(highlight_content) => {
-                            (highlight_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                            (highlight_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_scalable_font_size_for_regular_text(buffer_font_size))
                         }
                         MarkdownToken::Emoji(emoji_content) => {
-                            (emoji_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                            (emoji_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_scalable_font_size_for_regular_text(buffer_font_size))
                         }
                         MarkdownToken::Html(html_content) => {
                             // For now, render HTML as raw text (could be enhanced later for specific tags)
-                            (html_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro Mono", self.get_font_size_for_code())
+                            (html_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro Mono", self.get_scalable_font_size_for_code(buffer_font_size))
                         }
                         MarkdownToken::Subscript(sub_content) => {
                             // Render subscript content with smaller font size
-                            (sub_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text() * 0.8)
+                            (sub_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.scaled_rems(0.8, buffer_font_size))
                         }
                         MarkdownToken::Superscript(sup_content) => {
                             // Render superscript content with smaller font size
-                            (sup_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text() * 0.8)
+                            (sup_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.scaled_rems(0.8, buffer_font_size))
                         }
                         _ => {
                             // For other tokens, show original text
                             let original_text = &content_str[token.start..token.end];
-                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_scalable_font_size_for_regular_text(buffer_font_size))
                         }
                     }
                 }
@@ -1260,14 +1287,14 @@ mod tests {
             start: 0,
             end: 7,
         };
-        assert_eq!(renderer.get_font_size_for_token(&h1_token), 24.0);
+        assert_eq!(renderer.get_font_size_for_token(&h1_token, 16.0), 24.0);
         
         let h3_token = ParsedToken {
             token_type: MarkdownToken::Heading(3, "Subtitle".to_string()),
             start: 0,
             end: 11,
         };
-        assert_eq!(renderer.get_font_size_for_token(&h3_token), 18.0);
+        assert_eq!(renderer.get_font_size_for_token(&h3_token, 16.0), 18.0);
         
         // Test other token types
         let bold_token = ParsedToken {
@@ -1275,14 +1302,14 @@ mod tests {
             start: 0,
             end: 8,
         };
-        assert_eq!(renderer.get_font_size_for_token(&bold_token), 16.0);
+        assert_eq!(renderer.get_font_size_for_token(&bold_token, 16.0), 16.0);
         
         let code_token = ParsedToken {
             token_type: MarkdownToken::Code("code".to_string()),
             start: 0,
             end: 6,
         };
-        assert_eq!(renderer.get_font_size_for_token(&code_token), 14.0);
+        assert_eq!(renderer.get_font_size_for_token(&code_token, 16.0), 14.0);
     }
 
     #[test]
@@ -1366,7 +1393,8 @@ mod tests {
             "Regular text **bold text**", 
             100, 
             None, 
-            &style_context
+            &style_context,
+            16.0
         );
         
         // Should have segments using theme colors instead of hardcoded values
@@ -1379,5 +1407,54 @@ mod tests {
         // Second segment should also use themed colors
         let second_color = segments[1].text_run.color;
         assert_ne!(second_color, rgb(0xcdd6f4).into()); // Should not be hardcoded value
+    }
+
+    // TDD RED: Test scalable sizing system (ENG-166)
+    #[test]
+    fn test_scaled_rems_calculation() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Test base calculation with default buffer font size
+        let base_size = 16.0;
+        assert_eq!(renderer.scaled_rems(1.0, base_size), 16.0);
+        assert_eq!(renderer.scaled_rems(1.5, base_size), 24.0);
+        assert_eq!(renderer.scaled_rems(0.875, base_size), 14.0);
+        
+        // Test scaling with different buffer font sizes
+        let larger_base = 20.0;
+        assert_eq!(renderer.scaled_rems(1.0, larger_base), 20.0);
+        assert_eq!(renderer.scaled_rems(1.5, larger_base), 30.0);
+        
+        let smaller_base = 12.0;
+        assert_eq!(renderer.scaled_rems(1.0, smaller_base), 12.0);
+        assert_eq!(renderer.scaled_rems(1.5, smaller_base), 18.0);
+    }
+
+    #[test] 
+    fn test_heading_sizes_scale_with_buffer_font() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Test H1 scaling (should be 1.5x buffer font size)
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 16.0), 24.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 20.0), 30.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(1, 12.0), 18.0);
+        
+        // Test H2 scaling (should be 1.25x buffer font size) 
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(2, 16.0), 20.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(2, 20.0), 25.0);
+        
+        // Test body text (should be 1x buffer font size)
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(5, 16.0), 16.0);
+        assert_eq!(renderer.get_scalable_font_size_for_heading_level(5, 20.0), 20.0);
+    }
+
+    #[test]
+    fn test_code_font_scales_with_buffer_font() {
+        let renderer = HybridTextRenderer::new();
+        
+        // Code should be 0.875x buffer font size
+        assert_eq!(renderer.get_scalable_font_size_for_code(16.0), 14.0);
+        assert_eq!(renderer.get_scalable_font_size_for_code(20.0), 17.5);
+        assert_eq!(renderer.get_scalable_font_size_for_code(12.0), 10.5);
     }
 }
