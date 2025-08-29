@@ -522,8 +522,8 @@ impl TextDocument {
         let line_slice = self.content.line(line_index);
         let line_len = line_slice.len_chars();
         // Don't include newline in line length for positioning
-        let line_content_len = if line_slice.char(line_len.saturating_sub(1)) == '\n' {
-            line_len.saturating_sub(1)
+        let line_content_len = if line_len > 0 && line_slice.char(line_len - 1) == '\n' {
+            line_len - 1
         } else {
             line_len
         };
