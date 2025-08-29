@@ -1399,6 +1399,111 @@ mod tests {
         assert_eq!(renderer.get_font_size_for_token(&code_token, 16.0), 14.0);
     }
 
+    // ENG-172: Coordinate accuracy investigation tests
+    #[test]
+    fn test_coordinate_mapping_accuracy_mixed_content() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Hello **world** and *italic* text";
+        
+        // Test cursor positioning at various points
+        
+        // 1. Before any markdown
+        let display_pos_0 = renderer.map_cursor_position(content, 0, None);
+        assert_eq!(display_pos_0, 0, "Start position should map correctly");
+        
+        // 2. At the start of bold markdown "**world**"
+        let display_pos_6 = renderer.map_cursor_position(content, 6, None); // At first "*" of "**world**"
+        let expected_6 = 6; // Should stay at 6 in display
+        assert_eq!(display_pos_6, expected_6, "Position at start of bold markdown should map correctly");
+        
+        // 3. Inside the bold content "world"
+        let display_pos_8 = renderer.map_cursor_position(content, 8, None); // At "w" in "**world**"
+        let expected_8 = 6; // In preview mode, should map to start of "world" (no markdown chars)
+        assert_eq!(display_pos_8, expected_8, "Position inside bold should map to start of transformed content");
+        
+        // 4. At end of bold markdown
+        let display_pos_13 = renderer.map_cursor_position(content, 13, None); // After "**world**"
+        let expected_13 = 11; // "Hello world" length in display mode
+        assert_eq!(display_pos_13, expected_13, "Position after bold should map to end of transformed content");
+        
+        // 5. Before italic markdown
+        let display_pos_18 = renderer.map_cursor_position(content, 18, None); // At "*italic*"
+        let expected_18 = 16; // "Hello world and " length in display
+        assert_eq!(display_pos_18, expected_18, "Position at italic start should map correctly");
+        
+        // Test reverse mapping (display to original)
+        let original_pos_6 = renderer.map_display_position_to_original(content, 6, 8, None); // Display pos 6 -> original
+        assert_eq!(original_pos_6, 6, "Display position should reverse map correctly");
+    }
+    
+    #[test]  
+    fn test_coordinate_mapping_with_selection() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Start **bold text** end";
+        let selection = Some(8..13); // Selecting "bold " (inside the bold markdown)
+        
+        // Test cursor mapping with selection context
+        let cursor_in_selection = renderer.map_cursor_position(content, 10, selection.clone()); // Inside "bold"
+        
+        // With selection, the bold should be in raw mode, so position should map directly
+        let expected = 10;
+        assert_eq!(cursor_in_selection, expected, "Cursor in selection should map directly in raw mode");
+        
+        // Test cursor outside selection - should be in preview mode
+        let cursor_outside = renderer.map_cursor_position(content, 2, selection.clone()); // In "Start"
+        assert_eq!(cursor_outside, 2, "Cursor outside selection should map correctly");
+    }
+    
+    #[test]
+    fn test_coordinate_consistency_round_trip() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Text with **bold** and `code` blocks";
+        
+        // Test round-trip consistency: original -> display -> original
+        for original_pos in 0..content.len() {
+            let display_pos = renderer.map_cursor_position(content, original_pos, None);
+            let back_to_original = renderer.map_display_position_to_original(content, display_pos, original_pos, None);
+            
+            // The round trip should be consistent - we should get back to a reasonable position
+            // Due to markdown transformation complexity, we allow some tolerance
+            let tolerance = 5; // Allow up to 5 chars difference
+            let diff = if back_to_original > original_pos {
+                back_to_original - original_pos
+            } else {
+                original_pos - back_to_original
+            };
+            
+            assert!(
+                diff <= tolerance,
+                "Round trip inconsistency: original {} -> display {} -> back {}, diff = {}",
+                original_pos, display_pos, back_to_original, diff
+            );
+        }
+    }
+    
+    #[test]
+    fn test_coordinate_accuracy_with_multiline_content() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Line 1 **bold**\nLine 2 *italic*\nLine 3 normal";
+        
+        // Test cursor positions across line boundaries
+        
+        // Position on line 1 before bold
+        let pos_line1_before = renderer.map_cursor_position(content, 7, None); // At "**bold**"
+        assert_eq!(pos_line1_before, 7, "Position before bold on line 1 should map correctly");
+        
+        // Position at start of line 2
+        let line2_start = content.find("Line 2").unwrap();
+        let pos_line2_start = renderer.map_cursor_position(content, line2_start, None);
+        assert_eq!(pos_line2_start, line2_start - 4, "Line 2 start should account for bold transformation"); // -4 for removed "**" chars
+        
+        // Position in italic on line 2
+        let italic_start = content.find("*italic*").unwrap();
+        let pos_in_italic = renderer.map_cursor_position(content, italic_start + 1, None); // Inside "*italic*"
+        let expected_italic = line2_start - 4 + 7; // "Line 2 " adjusted for line 1 transformation
+        assert_eq!(pos_in_italic, expected_italic, "Position in italic should map correctly");
+    }
+
     #[test]
     fn test_generate_styled_text_segments() {
         let renderer = HybridTextRenderer::new();
