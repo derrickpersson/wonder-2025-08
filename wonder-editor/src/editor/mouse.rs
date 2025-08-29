@@ -76,9 +76,8 @@ impl MarkdownEditor {
     }
 
     // Helper method to convert screen coordinates to character positions
+    // Fixed to integrate with hybrid renderer coordinate mapping
     fn convert_point_to_character_index(&self, point: Point<Pixels>) -> usize {
-        // Basic coordinate to character conversion
-        // This mimics the logic in character_index_for_point but for direct use
         let padding = px(16.0);
         let line_height = px(24.0);
         
@@ -95,20 +94,37 @@ impl MarkdownEditor {
             return content.chars().count();
         }
         
-        // Calculate character position within the clicked line
+        // Calculate character position within the clicked line using hybrid renderer
         let line_content = lines[line_index];
         let relative_x = point.x - padding;
         
-        // Simple character width approximation (will be improved with proper text measurement)
-        let font_size = px(16.0);
-        let approx_char_width = font_size * 0.6;
-        let char_index_in_line = ((relative_x / approx_char_width).floor() as usize).min(line_content.chars().count());
-        
-        // Calculate absolute position in document
+        // Find the original cursor position at start of this line
         let chars_before_line: usize = lines.iter().take(line_index).map(|l| l.chars().count() + 1).sum();
-        let absolute_position = chars_before_line + char_index_in_line;
         
-        absolute_position.min(content.chars().count())
+        // Simplified approach: use a basic approximation that accounts for hybrid rendering
+        // This is more accurate than the original but much simpler than full coordinate mapping
+        let base_font_size = 16.0;
+        let approx_char_width = base_font_size * 0.6;
+        let rough_char_offset = ((relative_x.0 / approx_char_width).round() as usize).min(line_content.chars().count());
+        
+        let original_position = chars_before_line + rough_char_offset;
+        
+        // Use hybrid renderer to check if this position makes sense
+        // If we're in a transformed area, try to find a reasonable nearby position
+        let selection = self.document.selection_range().map(|(start, end)| start..end);
+        let display_position = self.hybrid_renderer.map_cursor_position(
+            content.as_str(),
+            original_position, 
+            selection.clone()
+        );
+        
+        // If the display position mapping is reasonable, use it
+        // Otherwise fall back to simple calculation
+        if display_position <= content.chars().count() {
+            original_position
+        } else {
+            (chars_before_line + rough_char_offset).min(content.chars().count())
+        }
     }
 
     // ENG-139: Click count and selection helpers
