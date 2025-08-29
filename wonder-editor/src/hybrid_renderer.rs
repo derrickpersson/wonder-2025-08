@@ -1,7 +1,26 @@
 use std::ops::Range;
 use crate::markdown_parser::{ParsedToken, MarkdownParser, MarkdownToken};
-use gpui::{TextRun, rgb, Font, FontFeatures, FontWeight, FontStyle};
+use gpui::{TextRun, rgb, Font, FontFeatures, FontWeight, FontStyle, Hsla};
 use ropey::RopeSlice;
+
+// ENG-165: StyleContext for theme-aware styling
+#[derive(Clone)]
+pub struct StyleContext {
+    pub text_color: Hsla,
+    pub code_color: Hsla,
+    pub border_color: Hsla,
+}
+
+impl StyleContext {
+    pub fn new_for_test() -> Self {
+        // Minimal implementation for test to pass
+        Self {
+            text_color: Hsla { h: 0.0, s: 0.0, l: 0.85, a: 1.0 }, // Light gray instead of black
+            code_color: Hsla { h: 120.0, s: 0.5, l: 0.7, a: 1.0 }, // Green-ish instead of black
+            border_color: Hsla { h: 0.0, s: 0.0, l: 0.5, a: 1.0 }, // Medium gray instead of black
+        }
+    }
+}
 
 /// Trait for text content that can be efficiently processed by the hybrid renderer
 pub trait TextContent {
@@ -132,6 +151,132 @@ impl HybridTextRenderer {
         }
     }
     
+    pub fn generate_styled_text_segments_with_context<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>, style_context: &StyleContext) -> Vec<StyledTextSegment> {
+        if content.text_is_empty() {
+            return vec![];
+        }
+        
+        let content_str = content.text_to_string();
+        let token_modes = self.render_document(&content_str, cursor_position, selection.clone());
+        let mut segments = Vec::new();
+        let mut current_pos = 0;
+        
+        // Sort tokens by start position to process them in order
+        let mut sorted_tokens: Vec<_> = token_modes.iter().collect();
+        sorted_tokens.sort_by_key(|(token, _)| token.start);
+        
+        for (token, mode) in sorted_tokens {
+            // Add any text before this token using theme colors
+            if token.start > current_pos {
+                let before_text = &content_str[current_pos..token.start];
+                segments.push(StyledTextSegment {
+                    text: before_text.to_string(),
+                    text_run: TextRun {
+                        len: before_text.len(),
+                        font: Font {
+                            family: "system-ui".into(),
+                            features: FontFeatures::default(),
+                            weight: FontWeight::NORMAL,
+                            style: FontStyle::Normal,
+                            fallbacks: None,
+                        },
+                        color: style_context.text_color.into(),
+                        background_color: None,
+                        underline: Default::default(),
+                        strikethrough: Default::default(),
+                    },
+                    font_size: self.get_font_size_for_regular_text(),
+                });
+            }
+            
+            // Handle the token based on its mode using StyleContext
+            let (display_text, font_weight, font_style, color, font_family, font_size) = match mode {
+                TokenRenderMode::Raw => {
+                    // Raw mode: show original markdown syntax
+                    let original_text = &content_str[token.start..token.end];
+                    (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                }
+                TokenRenderMode::Preview => {
+                    // Preview mode: show transformed content with appropriate styling and font size
+                    match &token.token_type {
+                        MarkdownToken::Bold(inner_content) => {
+                            (inner_content.clone(), FontWeight::BOLD, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Italic(inner_content) => {
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Italic, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Heading(level, content) => {
+                            (content.clone(), FontWeight::BOLD, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_heading_level(*level))
+                        }
+                        MarkdownToken::Code(inner_content) => {
+                            (inner_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.code_color, "monospace", self.get_font_size_for_code())
+                        }
+                        MarkdownToken::Tag(tag_content) => {
+                            (format!("#{}", tag_content), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Highlight(highlight_content) => {
+                            (highlight_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Emoji(emoji_content) => {
+                            (emoji_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        _ => {
+                            // For other tokens, show original text
+                            let original_text = &content_str[token.start..token.end];
+                            (original_text.to_string(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                    }
+                }
+            };
+            
+            segments.push(StyledTextSegment {
+                text: display_text.clone(),
+                text_run: TextRun {
+                    len: display_text.len(),
+                    font: Font {
+                        family: font_family.into(),
+                        features: FontFeatures::default(),
+                        weight: font_weight,
+                        style: font_style,
+                        fallbacks: None,
+                    },
+                    color: color.into(),
+                    background_color: None,
+                    underline: Default::default(),
+                    strikethrough: Default::default(),
+                },
+                font_size,
+            });
+            
+            current_pos = token.end;
+        }
+        
+        // Add any remaining text after the last token
+        if current_pos < content_str.len() {
+            let remaining_text = &content_str[current_pos..];
+            segments.push(StyledTextSegment {
+                text: remaining_text.to_string(),
+                text_run: TextRun {
+                    len: remaining_text.len(),
+                    font: Font {
+                        family: "system-ui".into(),
+                        features: FontFeatures::default(),
+                        weight: FontWeight::NORMAL,
+                        style: FontStyle::Normal,
+                        fallbacks: None,
+                    },
+                    color: style_context.text_color.into(),
+                    background_color: None,
+                    underline: Default::default(),
+                    strikethrough: Default::default(),
+                },
+                font_size: self.get_font_size_for_regular_text(),
+            });
+        }
+        
+        segments
+    }
+
     pub fn generate_styled_text_segments<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>) -> Vec<StyledTextSegment> {
         if content.text_is_empty() {
             return vec![];
@@ -1159,5 +1304,46 @@ mod tests {
         assert_eq!(segments[0].text, "Medium Heading");
         assert_eq!(segments[0].font_size, 18.0); // H3 should be 18px
         assert_eq!(segments[0].text_run.font.weight, gpui::FontWeight::BOLD);
+    }
+
+    // TDD RED: Test for theme-aware styling context (ENG-165)
+    #[test]
+    fn test_style_context_uses_theme_colors() {
+        // This test will initially fail as StyleContext doesn't exist yet
+        let style_context = StyleContext::new_for_test();
+        
+        // Should use theme colors instead of hardcoded values
+        assert_ne!(style_context.text_color, gpui::Hsla { h: 0.0, s: 0.0, l: 0.0, a: 1.0 });
+        assert_ne!(style_context.code_color, gpui::Hsla { h: 0.0, s: 0.0, l: 0.0, a: 1.0 });
+        
+        // Theme colors should be properly set
+        assert!(style_context.text_color.a > 0.0); // Not transparent
+        assert!(style_context.code_color.a > 0.0);
+    }
+
+    // TDD RED: Test for renderer using StyleContext colors instead of hardcoded rgb values
+    #[test]
+    fn test_renderer_uses_style_context_colors() {
+        let renderer = HybridTextRenderer::new();
+        let style_context = StyleContext::new_for_test();
+        
+        // This should use StyleContext colors instead of hardcoded rgb() calls
+        let segments = renderer.generate_styled_text_segments_with_context(
+            "Regular text **bold text**", 
+            100, 
+            None, 
+            &style_context
+        );
+        
+        // Should have segments using theme colors instead of hardcoded values
+        assert_eq!(segments.len(), 2);
+        
+        // First segment should use theme text color
+        let first_color = segments[0].text_run.color;
+        assert_ne!(first_color, rgb(0xcdd6f4).into()); // Should not be hardcoded value
+        
+        // Second segment should also use themed colors
+        let second_color = segments[1].text_run.color;
+        assert_ne!(second_color, rgb(0xcdd6f4).into()); // Should not be hardcoded value
     }
 }
