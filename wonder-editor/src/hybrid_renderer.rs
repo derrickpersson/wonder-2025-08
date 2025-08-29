@@ -3,6 +3,45 @@ use crate::markdown_parser::{ParsedToken, MarkdownParser, MarkdownToken};
 use gpui::{TextRun, rgb, Font, FontFeatures, FontWeight, FontStyle, Hsla, div, Element, IntoElement};
 use ropey::RopeSlice;
 
+// ENG-173: Unified Coordinate System Data Structures
+#[derive(Debug, Clone)]
+pub struct CoordinateMap {
+    /// Bidirectional position mapping: original_pos -> display_pos
+    pub original_to_display: Vec<usize>,
+    /// Bidirectional position mapping: display_pos -> original_pos  
+    pub display_to_original: Vec<usize>,
+    /// Token boundary tracking for accurate coordinate mapping
+    pub token_boundaries: Vec<TokenBoundary>,
+    /// Line offset tracking for multiline content
+    pub line_offsets: Vec<LineOffset>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TokenBoundary {
+    /// Start position in original content
+    pub original_start: usize,
+    /// End position in original content
+    pub original_end: usize,
+    /// Start position in display content
+    pub display_start: usize,
+    /// End position in display content
+    pub display_end: usize,
+    /// Type of markdown token
+    pub token_type: MarkdownToken,
+    /// How this token should be rendered
+    pub render_mode: TokenRenderMode,
+}
+
+#[derive(Debug, Clone)]
+pub struct LineOffset {
+    /// Line number (0-based)
+    pub line_number: usize,
+    /// Character offset in original content where line starts
+    pub original_offset: usize,
+    /// Character offset in display content where line starts
+    pub display_offset: usize,
+}
+
 // ENG-165: StyleContext for theme-aware styling
 #[derive(Clone)]
 pub struct StyleContext {
@@ -131,6 +170,34 @@ impl HybridTextRenderer {
     pub fn new() -> Self {
         Self {
             parser: MarkdownParser::new(),
+        }
+    }
+
+    // ENG-173: Phase 1 - Create unified coordinate mapping system
+    pub fn create_coordinate_map<T: TextContent>(&self, content: T, cursor_position: usize, selection: Option<Range<usize>>) -> CoordinateMap {
+        let content_str = content.text_to_string();
+        let content_chars: Vec<char> = content_str.chars().collect();
+        
+        // Build simpler coordinate mapping first
+        let mut original_to_display = Vec::new();
+        let mut display_to_original = Vec::new();
+        let token_boundaries = Vec::new(); // For now, keep empty
+        let line_offsets = Vec::new(); // For now, keep empty
+        
+        // For minimal implementation - just direct mapping for now
+        // This will make the first test pass
+        for i in 0..=content_chars.len() {
+            original_to_display.push(i);
+            if i < content_chars.len() {
+                display_to_original.push(i);
+            }
+        }
+        
+        CoordinateMap {
+            original_to_display,
+            display_to_original,
+            token_boundaries,
+            line_offsets,
         }
     }
     
@@ -1502,6 +1569,88 @@ mod tests {
         let pos_in_italic = renderer.map_cursor_position(content, italic_start + 1, None); // Inside "*italic*"
         let expected_italic = line2_start - 4 + 7; // "Line 2 " adjusted for line 1 transformation
         assert_eq!(pos_in_italic, expected_italic, "Position in italic should map correctly");
+    }
+
+    // ENG-173: Phase 1 - Unified Coordinate System Tests  
+    #[test]
+    fn test_coordinate_map_creation() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Hello **bold** text";
+        
+        // Test coordinate map creation for content with markdown tokens
+        let coordinate_map = renderer.create_coordinate_map(content, 0, None);
+        
+        // Verify basic structure
+        assert!(coordinate_map.original_to_display.len() > 0, "Should have original to display mapping");
+        assert!(coordinate_map.display_to_original.len() > 0, "Should have display to original mapping");
+        
+        // Verify bidirectional consistency - every original position should map to a display position and back
+        for (original_pos, &display_pos) in coordinate_map.original_to_display.iter().enumerate() {
+            if display_pos < coordinate_map.display_to_original.len() {
+                let back_to_original = coordinate_map.display_to_original[display_pos];
+                assert!(
+                    (back_to_original as i32 - original_pos as i32).abs() <= 1, 
+                    "Round trip consistency failed: {} -> {} -> {}", 
+                    original_pos, display_pos, back_to_original
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_token_boundary_tracking() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Start **bold text** end";
+        
+        let coordinate_map = renderer.create_coordinate_map(content, 0, None);
+        
+        // Should have token boundaries for the bold markdown
+        assert!(!coordinate_map.token_boundaries.is_empty(), "Should track token boundaries");
+        
+        // Find the bold token boundary
+        let bold_boundary = coordinate_map.token_boundaries.iter()
+            .find(|b| matches!(b.token_type, MarkdownToken::Bold(_)))
+            .expect("Should have bold token boundary");
+            
+        // Verify boundary positions are correct
+        assert_eq!(bold_boundary.original_start, 6, "Bold should start at position 6 ('**bold')");
+        assert_eq!(bold_boundary.original_end, 18, "Bold should end at position 18 (after 'text**')");
+        
+        // In preview mode, display should be shorter (no markdown chars)
+        assert_eq!(bold_boundary.display_start, 6, "Display start should be 6 ('Start ')");
+        assert!(bold_boundary.display_end < bold_boundary.original_end, "Display end should be shorter than original");
+    }
+    
+    #[test] 
+    fn test_coordinate_map_with_multiple_tokens() {
+        let renderer = HybridTextRenderer::new();
+        let content = "Text with **bold** and *italic* tokens";
+        
+        let coordinate_map = renderer.create_coordinate_map(content, 0, None);
+        
+        // Should track multiple token boundaries
+        assert!(coordinate_map.token_boundaries.len() >= 2, "Should track multiple tokens");
+        
+        // Find both token types
+        let has_bold = coordinate_map.token_boundaries.iter()
+            .any(|b| matches!(b.token_type, MarkdownToken::Bold(_)));
+        let has_italic = coordinate_map.token_boundaries.iter()
+            .any(|b| matches!(b.token_type, MarkdownToken::Italic(_)));
+            
+        assert!(has_bold, "Should track bold token");
+        assert!(has_italic, "Should track italic token");
+        
+        // Verify non-overlapping boundaries
+        let mut boundaries = coordinate_map.token_boundaries.clone();
+        boundaries.sort_by_key(|b| b.original_start);
+        
+        for window in boundaries.windows(2) {
+            assert!(
+                window[0].original_end <= window[1].original_start,
+                "Token boundaries should not overlap: {:?} and {:?}",
+                window[0], window[1]
+            );
+        }
     }
 
     #[test]
