@@ -32,6 +32,9 @@ pub enum MarkdownToken {
     Tag(String), // tag content
     Highlight(String), // highlighted text
     Emoji(String), // emoji character(s)
+    Html(String), // HTML content
+    Subscript(String), // subscript text
+    Superscript(String), // superscript text
 }
 
 #[derive(Clone)]
@@ -46,6 +49,7 @@ impl MarkdownParser {
         options.insert(Options::ENABLE_FOOTNOTES);
         options.insert(Options::ENABLE_STRIKETHROUGH);
         options.insert(Options::ENABLE_TASKLISTS);
+        options.insert(Options::ENABLE_SMART_PUNCTUATION);
         
         Self { options }
     }
@@ -73,6 +77,8 @@ impl MarkdownParser {
         let mut in_table_head = false;
         let mut in_table_row = false;
         let mut in_table_cell = false;
+        let mut in_subscript = false;
+        let mut in_superscript = false;
         
         for event in parser {
             match event {
@@ -220,7 +226,7 @@ impl MarkdownParser {
                 },
                 Event::Text(text) => {
                     current_text.push_str(&text);
-                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote && !in_table_cell {
+                    if !in_heading.is_some() && !in_emphasis && !in_strong && !in_strikethrough && !in_code && !in_link && !in_image && !in_list_item && !in_block_quote && !in_table_cell && !in_subscript && !in_superscript {
                         // Parse special tokens in text (tags, highlights, emojis)
                         let text_with_special = if text.contains("==") {
                             self.parse_special_tokens_in_text(&text)
@@ -243,6 +249,66 @@ impl MarkdownParser {
                 }
                 Event::FootnoteReference(label) => {
                     tokens.push(MarkdownToken::FootnoteReference(label.to_string()));
+                }
+                Event::Html(html) => {
+                    let html_str = html.to_string();
+                    // Check for specific HTML tags and handle state transitions
+                    if html_str == "<sub>" {
+                        in_subscript = true;
+                        current_text.clear();
+                    } else if html_str == "</sub>" && in_subscript {
+                        tokens.push(MarkdownToken::Subscript(current_text.clone()));
+                        current_text.clear();
+                        in_subscript = false;
+                    } else if html_str == "<sup>" {
+                        in_superscript = true;
+                        current_text.clear();
+                    } else if html_str == "</sup>" && in_superscript {
+                        tokens.push(MarkdownToken::Superscript(current_text.clone()));
+                        current_text.clear();
+                        in_superscript = false;
+                    } else if html_str.starts_with("<sub>") && html_str.ends_with("</sub>") {
+                        // Handle complete subscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sub>").trim_end_matches("</sub>");
+                        tokens.push(MarkdownToken::Subscript(content.to_string()));
+                    } else if html_str.starts_with("<sup>") && html_str.ends_with("</sup>") {
+                        // Handle complete superscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sup>").trim_end_matches("</sup>");
+                        tokens.push(MarkdownToken::Superscript(content.to_string()));
+                    } else {
+                        // General HTML token for other HTML content
+                        tokens.push(MarkdownToken::Html(html_str));
+                    }
+                }
+                Event::InlineHtml(html) => {
+                    let html_str = html.to_string();
+                    // Check for specific inline HTML tags and handle state transitions
+                    if html_str == "<sub>" {
+                        in_subscript = true;
+                        current_text.clear();
+                    } else if html_str == "</sub>" && in_subscript {
+                        tokens.push(MarkdownToken::Subscript(current_text.clone()));
+                        current_text.clear();
+                        in_subscript = false;
+                    } else if html_str == "<sup>" {
+                        in_superscript = true;
+                        current_text.clear();
+                    } else if html_str == "</sup>" && in_superscript {
+                        tokens.push(MarkdownToken::Superscript(current_text.clone()));
+                        current_text.clear();
+                        in_superscript = false;
+                    } else if html_str.starts_with("<sub>") && html_str.ends_with("</sub>") {
+                        // Handle complete subscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sub>").trim_end_matches("</sub>");
+                        tokens.push(MarkdownToken::Subscript(content.to_string()));
+                    } else if html_str.starts_with("<sup>") && html_str.ends_with("</sup>") {
+                        // Handle complete superscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sup>").trim_end_matches("</sup>");
+                        tokens.push(MarkdownToken::Superscript(content.to_string()));
+                    } else {
+                        // General HTML token for other inline HTML content
+                        tokens.push(MarkdownToken::Html(html_str));
+                    }
                 }
                 _ => {}
             }
@@ -282,6 +348,10 @@ impl MarkdownParser {
         let mut table_row_start = 0;
         let mut in_table_cell = false;
         let mut table_cell_start = 0;
+        let mut in_subscript = false;
+        let mut subscript_start = 0;
+        let mut in_superscript = false;
+        let mut superscript_start = 0;
         
         for (event, range) in offset_iter {
             match event {
@@ -468,7 +538,7 @@ impl MarkdownParser {
                     }
                 }
                 Event::Text(text) => {
-                    if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell {
+                    if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell || in_subscript || in_superscript {
                         current_text.push_str(&text);
                     } else {
                         // Parse special tokens in text with positions (tags, highlights, emojis)
@@ -493,6 +563,110 @@ impl MarkdownParser {
                         start: range.start,
                         end: range.end,
                     });
+                }
+                Event::Html(html) => {
+                    let html_str = html.to_string();
+                    // Check for specific HTML tags and handle state transitions
+                    if html_str == "<sub>" {
+                        in_subscript = true;
+                        subscript_start = range.start;
+                        current_text.clear();
+                    } else if html_str == "</sub>" && in_subscript {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Subscript(current_text.clone()),
+                            start: subscript_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_subscript = false;
+                    } else if html_str == "<sup>" {
+                        in_superscript = true;
+                        superscript_start = range.start;
+                        current_text.clear();
+                    } else if html_str == "</sup>" && in_superscript {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Superscript(current_text.clone()),
+                            start: superscript_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_superscript = false;
+                    } else if html_str.starts_with("<sub>") && html_str.ends_with("</sub>") {
+                        // Handle complete subscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sub>").trim_end_matches("</sub>");
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Subscript(content.to_string()),
+                            start: range.start,
+                            end: range.end,
+                        });
+                    } else if html_str.starts_with("<sup>") && html_str.ends_with("</sup>") {
+                        // Handle complete superscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sup>").trim_end_matches("</sup>");
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Superscript(content.to_string()),
+                            start: range.start,
+                            end: range.end,
+                        });
+                    } else {
+                        // General HTML token for other HTML content
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Html(html_str),
+                            start: range.start,
+                            end: range.end,
+                        });
+                    }
+                }
+                Event::InlineHtml(html) => {
+                    let html_str = html.to_string();
+                    // Check for specific inline HTML tags and handle state transitions
+                    if html_str == "<sub>" {
+                        in_subscript = true;
+                        subscript_start = range.start;
+                        current_text.clear();
+                    } else if html_str == "</sub>" && in_subscript {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Subscript(current_text.clone()),
+                            start: subscript_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_subscript = false;
+                    } else if html_str == "<sup>" {
+                        in_superscript = true;
+                        superscript_start = range.start;
+                        current_text.clear();
+                    } else if html_str == "</sup>" && in_superscript {
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Superscript(current_text.clone()),
+                            start: superscript_start,
+                            end: range.end,
+                        });
+                        current_text.clear();
+                        in_superscript = false;
+                    } else if html_str.starts_with("<sub>") && html_str.ends_with("</sub>") {
+                        // Handle complete subscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sub>").trim_end_matches("</sub>");
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Subscript(content.to_string()),
+                            start: range.start,
+                            end: range.end,
+                        });
+                    } else if html_str.starts_with("<sup>") && html_str.ends_with("</sup>") {
+                        // Handle complete superscript in one event (fallback case)
+                        let content = html_str.trim_start_matches("<sup>").trim_end_matches("</sup>");
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Superscript(content.to_string()),
+                            start: range.start,
+                            end: range.end,
+                        });
+                    } else {
+                        // General HTML token for other inline HTML content
+                        tokens.push(ParsedToken {
+                            token_type: MarkdownToken::Html(html_str),
+                            start: range.start,
+                            end: range.end,
+                        });
+                    }
                 }
                 _ => {}
             }
@@ -1646,5 +1820,64 @@ mod tests {
         assert!(emoji_tokens.contains(&"🎉"));
         assert!(emoji_tokens.contains(&"🎊"));
         assert!(emoji_tokens.contains(&"🥳"));
+    }
+
+    // TDD RED: First failing tests for HTML parsing (ENG-157)
+    #[test]
+    fn test_parse_html_basic_tags() {
+        let parser = MarkdownParser::new();
+        let markdown = "This is <div class=\"highlight\">custom html</div> text";
+        let tokens = parser.parse(markdown);
+        
+        
+        // Should find HTML token for div tag (which isn't markdown formatting)
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Html(s) if s.contains("<div"))));
+    }
+
+    #[test]
+    fn test_parse_subscript() {
+        let parser = MarkdownParser::new();
+        let markdown = "Water is <sub>2</sub>";
+        let tokens = parser.parse(markdown);
+        
+        
+        // Should find subscript token
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Subscript(s) if s == "2")));
+    }
+
+    #[test]
+    fn test_parse_superscript() {
+        let parser = MarkdownParser::new();
+        let markdown = "Einstein's E = mc<sup>2</sup>";
+        let tokens = parser.parse(markdown);
+        
+        
+        // Should find superscript token
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Superscript(s) if s == "2")));
+    }
+
+    #[test]
+    fn test_parse_html_with_positions() {
+        let parser = MarkdownParser::new();
+        let markdown = "This is <div>content</div> text";
+        let tokens = parser.parse_with_positions(markdown);
+        
+        
+        // Should find HTML tokens with correct positions
+        let html_tokens: Vec<_> = tokens.iter().filter(|t| matches!(t.token_type, MarkdownToken::Html(_))).collect();
+        assert!(html_tokens.len() >= 1);
+        
+        // Verify position tracking
+        assert!(html_tokens[0].start < html_tokens[0].end);
+    }
+
+    #[test]
+    fn test_parse_nested_html() {
+        let parser = MarkdownParser::new();
+        let markdown = "<strong><em>nested</em></strong>";
+        let tokens = parser.parse(markdown);
+        
+        // Should find nested HTML tokens
+        assert!(tokens.iter().any(|t| matches!(t, MarkdownToken::Html(_))));
     }
 }

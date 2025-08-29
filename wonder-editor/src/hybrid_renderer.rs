@@ -146,7 +146,8 @@ impl HybridTextRenderer {
             MarkdownToken::Heading(level, _) => self.get_font_size_for_heading_level(*level),
             MarkdownToken::Code(_) => self.get_font_size_for_code(),
             MarkdownToken::Table | MarkdownToken::TableHeader | MarkdownToken::TableRow | MarkdownToken::TableCell(_) 
-            | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) | MarkdownToken::Tag(_) | MarkdownToken::Highlight(_) | MarkdownToken::Emoji(_) => self.get_font_size_for_regular_text(),
+            | MarkdownToken::Footnote(_, _) | MarkdownToken::FootnoteReference(_) | MarkdownToken::Tag(_) | MarkdownToken::Highlight(_) | MarkdownToken::Emoji(_) 
+            | MarkdownToken::Html(_) | MarkdownToken::Subscript(_) | MarkdownToken::Superscript(_) => self.get_font_size_for_regular_text(),
             _ => self.get_font_size_for_regular_text(),
         }
     }
@@ -219,6 +220,18 @@ impl HybridTextRenderer {
                         }
                         MarkdownToken::Emoji(emoji_content) => {
                             (emoji_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Html(html_content) => {
+                            // For now, render HTML as raw text (could be enhanced later for specific tags)
+                            (html_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro Mono", self.get_font_size_for_code())
+                        }
+                        MarkdownToken::Subscript(sub_content) => {
+                            // Render subscript content with smaller font size
+                            (sub_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text() * 0.8)
+                        }
+                        MarkdownToken::Superscript(sup_content) => {
+                            // Render superscript content with smaller font size
+                            (sup_content.clone(), FontWeight::NORMAL, FontStyle::Normal, style_context.text_color, "SF Pro", self.get_font_size_for_regular_text() * 0.8)
                         }
                         _ => {
                             // For other tokens, show original text
@@ -345,6 +358,15 @@ impl HybridTextRenderer {
                         }
                         MarkdownToken::Emoji(emoji_content) => {
                             (emoji_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_regular_text())
+                        }
+                        MarkdownToken::Html(html_content) => {
+                            (html_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xf38ba8), "SF Pro Mono", self.get_font_size_for_code())
+                        }
+                        MarkdownToken::Subscript(sub_content) => {
+                            (sub_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_regular_text() * 0.8)
+                        }
+                        MarkdownToken::Superscript(sup_content) => {
+                            (sup_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "SF Pro", self.get_font_size_for_regular_text() * 0.8)
                         }
                         _ => {
                             // For other tokens, show original text
@@ -629,6 +651,15 @@ impl HybridTextRenderer {
                         MarkdownToken::Emoji(emoji_content) => {
                             (emoji_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "system-ui")
                         }
+                        MarkdownToken::Html(html_content) => {
+                            (html_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xf38ba8), "monospace")
+                        }
+                        MarkdownToken::Subscript(sub_content) => {
+                            (sub_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "system-ui")
+                        }
+                        MarkdownToken::Superscript(sup_content) => {
+                            (sup_content.clone(), FontWeight::NORMAL, FontStyle::Normal, rgb(0xcdd6f4), "system-ui")
+                        }
                         _ => {
                             // For other tokens, show original text
                             let original_text = &original_content[token.start..token.end];
@@ -748,6 +779,9 @@ impl HybridTextRenderer {
                         MarkdownToken::Tag(tag_content) => format!("#{}", tag_content),
                         MarkdownToken::Highlight(highlight_content) => highlight_content.clone(),
                         MarkdownToken::Emoji(emoji_content) => emoji_content.clone(),
+                        MarkdownToken::Html(html_content) => html_content.clone(),
+                        MarkdownToken::Subscript(sub_content) => sub_content.clone(),
+                        MarkdownToken::Superscript(sup_content) => sup_content.clone(),
                         _ => original_text.to_string(),
                     };
                     (display_text, original_text.to_string())
