@@ -1,7 +1,8 @@
-use crate::core::TextDocument;
+use crate::core::{CoordinateConversion, Point as TextPoint, RopeCoordinateMapper, ScreenPosition};
 use gpui::{
     px, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window,
 };
+use ropey::Rope;
 
 use super::MarkdownEditor;
 
@@ -75,69 +76,85 @@ impl MarkdownEditor {
         }
     }
 
-    // Helper method to convert screen coordinates to character positions
-    // Comprehensive fix for mouse positioning accuracy with hybrid rendering
-    fn convert_point_to_character_index(&self, point: Point<Pixels>) -> usize {
+    // Enhanced method to convert screen coordinates to character positions using Point-based system
+    // This provides much better accuracy than the previous fixed-approximation approach
+    fn convert_point_to_character_index(&self, screen_point: Point<Pixels>) -> usize {
+        // First, convert screen coordinates to text coordinates (Point)
+        let text_point = self.convert_screen_to_text_point(screen_point);
+        
+        // Then use coordinate mapper to convert Point to offset
+        let content = self.document.content();
+        let rope = Rope::from_str(&content);
+        let mapper = RopeCoordinateMapper::new(rope);
+        
+        // Clamp the point to valid document bounds
+        let clamped_point = mapper.clamp_point(text_point);
+        
+        // Convert to offset
+        mapper.point_to_offset(clamped_point)
+    }
+    
+    // Convert screen coordinates to text coordinates (Point)
+    fn convert_screen_to_text_point(&self, screen_point: Point<Pixels>) -> TextPoint {
         let padding = px(16.0);
         
         // Account for editor bounds (status bar height + editor padding)
         let editor_content_y_offset = px(30.0) + padding; // Status bar height + padding
-        let relative_y = point.y - editor_content_y_offset;
-        let relative_x = point.x - padding;
+        let relative_y = screen_point.y - editor_content_y_offset;
+        let relative_x = screen_point.x - padding;
         
+        // Convert to text coordinates
+        let screen_pos = ScreenPosition::new(relative_x.0, relative_y.0);
+        
+        // Calculate row and column based on font metrics
+        self.convert_screen_position_to_text_point(screen_pos)
+    }
+    
+    // Convert screen position to text point using proper font metrics
+    fn convert_screen_position_to_text_point(&self, screen_pos: ScreenPosition) -> TextPoint {
         let content = self.document.content();
         let lines: Vec<&str> = content.lines().collect();
         
         if lines.is_empty() {
-            return 0;
+            return TextPoint::zero();
         }
         
-        // Find the correct line by accounting for different line heights based on content
-        let mut current_y_offset = px(0.0);
-        let mut line_index = 0;
-        let mut chars_before_line = 0;
+        // Find the correct row by accounting for variable line heights
+        let mut current_y_offset = 0.0;
+        let mut row = 0u32;
         
         for (idx, line_content) in lines.iter().enumerate() {
             // Calculate line height based on content (headings have larger line heights)
-            let line_height = self.calculate_line_height_for_content(line_content, chars_before_line);
+            let line_height = self.calculate_line_height_for_content_pixels(line_content);
             
             // Check if click is within this line's bounds
-            if relative_y >= current_y_offset && relative_y < current_y_offset + line_height {
-                line_index = idx;
+            if screen_pos.y >= current_y_offset && screen_pos.y < current_y_offset + line_height {
+                row = idx as u32;
                 break;
             }
             
             current_y_offset += line_height;
-            chars_before_line += line_content.chars().count() + 1; // +1 for newline
             
             // If we're past the last line, use the last line
             if idx == lines.len() - 1 {
-                line_index = idx;
+                row = idx as u32;
             }
         }
         
-        // If clicked beyond all lines, return end of document
-        if line_index >= lines.len() {
-            return content.chars().count();
-        }
+        // Clamp row to valid range
+        row = row.min((lines.len().saturating_sub(1)) as u32);
         
-        let line_content = lines[line_index];
+        // Calculate column within the line
+        let line_content = lines[row as usize];
+        let column = self.calculate_column_from_x_position(line_content, screen_pos.x, row);
         
-        // Calculate character position within the clicked line using more accurate text measurement
-        let char_offset_in_line = self.calculate_character_offset_from_x_position(
-            line_content, 
-            relative_x, 
-            chars_before_line
-        );
-        
-        let original_position = chars_before_line + char_offset_in_line;
-        original_position.min(content.chars().count())
+        TextPoint::new(row, column)
     }
     
-    // Calculate line height based on content (headings are taller)
-    fn calculate_line_height_for_content(&self, line_content: &str, line_start_pos: usize) -> Pixels {
+    // Calculate line height based on content (headings are taller) - returns f32 for pixel calculations
+    fn calculate_line_height_for_content_pixels(&self, line_content: &str) -> f32 {
         // Default line height
-        let base_line_height = px(24.0);
+        let base_line_height = 24.0;
         
         // Check if this line is a heading and calculate appropriate height
         if line_content.starts_with('#') {
@@ -147,11 +164,56 @@ impl MarkdownEditor {
                 let base_font_size = 16.0;
                 let heading_font_size = self.hybrid_renderer.get_scalable_font_size_for_heading_level(heading_level, base_font_size);
                 let heading_line_height = self.hybrid_renderer.get_line_height_for_font_size(heading_font_size);
-                return px(heading_line_height);
+                return heading_line_height;
             }
         }
         
         base_line_height
+    }
+    
+    // Calculate line height based on content (headings are taller) - original method for backward compatibility
+    fn calculate_line_height_for_content(&self, line_content: &str, _line_start_pos: usize) -> Pixels {
+        px(self.calculate_line_height_for_content_pixels(line_content))
+    }
+    
+    // Calculate column position from X coordinate within a specific line
+    fn calculate_column_from_x_position(&self, line_content: &str, x_position: f32, _row: u32) -> u32 {
+        if line_content.is_empty() || x_position <= 0.0 {
+            return 0;
+        }
+        
+        // Determine font size for this line (headings use larger fonts)
+        let base_font_size = 16.0;
+        let font_size = if line_content.starts_with('#') {
+            let heading_level = line_content.chars().take_while(|&c| c == '#').count() as u32;
+            if heading_level <= 6 {
+                self.hybrid_renderer.get_scalable_font_size_for_heading_level(heading_level, base_font_size)
+            } else {
+                base_font_size
+            }
+        } else {
+            base_font_size
+        };
+        
+        // Use improved character width estimation
+        let char_width = font_size * 0.6; // Better approximation for monospace-ish text
+        
+        // Binary search approach for better accuracy
+        let mut best_column = 0u32;
+        let mut min_distance = f32::MAX;
+        let line_chars: Vec<char> = line_content.chars().collect();
+        
+        for col in 0..=line_chars.len() {
+            let estimated_x = (col as f32) * char_width;
+            let distance = (estimated_x - x_position).abs();
+            
+            if distance < min_distance {
+                min_distance = distance;
+                best_column = col as u32;
+            }
+        }
+        
+        best_column
     }
     
     // Calculate character offset from X position with better accuracy
