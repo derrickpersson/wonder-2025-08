@@ -249,34 +249,161 @@ wonder-editor/
 │   ├── main.rs              # Application entry point
 │   ├── lib.rs               # Library crate root for benchmarks
 │   ├── app.rs               # Main application component (GPUI UI)
-│   ├── editor.rs            # UI layer - Hybrid markdown editor component
 │   ├── benchmarks.rs        # ⚡ Performance benchmark suite (ENG-148)
 │   ├── bin/
 │   │   └── benchmark.rs     # 📊 Benchmark runner binary
+│   ├── editor/              # 📦 UI layer - Modular editor components
+│   │   ├── mod.rs           # Main MarkdownEditor struct and coordination
+│   │   ├── element.rs       # GPUI Element implementation for custom rendering
+│   │   ├── rendering.rs     # Editor-specific rendering logic
+│   │   ├── keyboard.rs      # Keyboard event handling and integration
+│   │   ├── mouse.rs         # Mouse event handling and positioning
+│   │   └── tests/           # Editor integration tests
 │   ├── core/                # 📦 Domain layer (business logic)
-│   │   ├── mod.rs           # Core module exports (TextDocument only)
+│   │   ├── mod.rs           # Core module exports and coordinate mapping
 │   │   ├── cursor.rs        # Cursor position management
 │   │   ├── selection.rs     # Text selection state management
-│   │   └── text_document.rs # 🚀 Rope-based text operations & selection (O(log n))
+│   │   ├── text_document.rs # 🚀 Rope-based text operations & selection (O(log n))
+│   │   ├── point.rs         # Point-based coordinate system
+│   │   └── coordinate_mapping.rs # Unified coordinate mapping system (ENG-173)
 │   ├── input/               # 📦 Input layer (user interactions)
 │   │   ├── mod.rs           # Input module exports
-│   │   ├── input_event.rs   # Input event types & special keys
-│   │   ├── commands.rs      # Command pattern for text operations
-│   │   └── keyboard_handler.rs # Input processing & command dispatch
-│   ├── hybrid_renderer.rs   # 🎨 Hybrid preview/raw mode rendering (Rope optimized)
+│   │   ├── actions.rs       # Action types and command patterns
+│   │   ├── keymap.rs        # Keyboard mapping configuration
+│   │   └── router.rs        # Input event routing and dispatch
+│   ├── rendering/           # 🎨 Modular rendering system (refactored)
+│   │   ├── mod.rs           # Rendering module exports and organization
+│   │   ├── style_context.rs # Theme-aware styling system (ENG-165)
+│   │   ├── typography.rs    # Typography hierarchy and sizing
+│   │   ├── token_mode.rs    # Token render mode determination
+│   │   ├── coordinate_mapping.rs # Coordinate system for rendering
+│   │   ├── text_runs.rs     # GPUI TextRun generation
+│   │   ├── text_content.rs  # Text content processing
+│   │   ├── layout.rs        # Layout management and positioning
+│   │   └── tests/           # Rendering module tests
+│   ├── hybrid_renderer.rs   # 🎨 Main hybrid preview/raw mode renderer
 │   └── markdown_parser.rs   # 📝 Markdown token parsing & positioning
 ├── Cargo.toml               # Dependencies and project metadata (includes ropey)
 └── CLAUDE.md                # This file - project conventions
 ```
 
 ### Architecture Layers (SOLID Compliant)
-1. **UI Layer** (`editor.rs`, `app.rs`) - Pure UI components, GPUI rendering
-2. **Input Layer** (`input/`) - Handles user interactions, converts to commands
-3. **Domain Layer** (`core/`) - Business logic, rope-based text operations, core abstractions
-4. **Rendering Layer** (`hybrid_renderer.rs`) - Preview/raw mode switching logic (rope optimized)
-5. **Parsing Layer** (`markdown_parser.rs`) - Markdown tokenization with positions
-6. **Performance Layer** (`benchmarks.rs`, `bin/benchmark.rs`) - Performance testing & validation
-7. **Infrastructure** - GPUI framework, ropey, external dependencies
+1. **UI Layer** (`editor/`, `app.rs`) - Modular UI components with GPUI rendering and custom elements
+2. **Input Layer** (`input/`) - Action-based input routing and command dispatch system
+3. **Domain Layer** (`core/`) - Business logic with rope-based text operations and unified coordinate system
+4. **Rendering Layer** (`rendering/`, `hybrid_renderer.rs`) - Modular theme-aware rendering with typography hierarchy
+5. **Parsing Layer** (`markdown_parser.rs`) - Markdown tokenization with accurate positioning
+6. **Performance Layer** (`benchmarks.rs`, `bin/benchmark.rs`) - Comprehensive performance testing & validation
+7. **Infrastructure** - GPUI framework, ropey, coordinate mapping, external dependencies
+
+## How the System Works 🔄
+
+### Overview
+Wonder Editor is a hybrid markdown editor that dynamically switches between raw markdown editing and rich text preview based on cursor position and selection state. The system uses a rope-based text data structure for O(log n) performance and a modular rendering architecture for optimal responsiveness.
+
+### Core Data Flow
+
+#### 1. **Text Storage & Management** (`core/text_document.rs`)
+```
+User Input → InputRouter → TextDocument (Rope) → Cursor/Selection Update
+```
+- **Rope Data Structure**: Text is stored using the `ropey` crate for efficient large document handling
+- **O(log n) Operations**: Insert, delete, and positioning operations scale logarithmically
+- **Cursor Management**: Point-based coordinate system tracks cursor position across line/column boundaries
+- **Selection State**: Range-based selection with visual highlighting support
+
+#### 2. **Input Processing Pipeline** (`input/`)
+```
+Keyboard/Mouse Events → InputRouter → EditorAction → TextDocument → UI Update
+```
+- **Action System**: All user interactions converted to structured EditorAction commands
+- **Input Router**: Centralized dispatch system that routes events to appropriate handlers
+- **Command Pattern**: Extensible action system supporting undo/redo and complex operations
+
+#### 3. **Hybrid Rendering Pipeline** (`rendering/`, `hybrid_renderer.rs`)
+```
+TextDocument → MarkdownParser → TokenRenderMode → StyledTextSegments → GPUI TextRuns
+```
+
+**Step 3a: Parsing & Tokenization**
+- **Markdown Parser**: Converts raw text to positioned tokens (headings, bold, italic, etc.)
+- **Position Tracking**: Each token maintains byte offset ranges in the original document
+- **Token Classification**: Identifies markdown syntax vs content for rendering decisions
+
+**Step 3b: Render Mode Determination** (`rendering/token_mode.rs`)
+- **Cursor-Based Switching**: Tokens switch between preview/raw mode based on cursor proximity
+- **Selection Awareness**: Selected text always renders in raw mode for editing
+- **Smart Boundaries**: Smooth transitions between preview and raw rendering
+
+**Step 3c: Styling & Typography** (`rendering/style_context.rs`, `rendering/typography.rs`)
+- **Theme System**: Context-aware styling with dark/light theme support
+- **Typography Hierarchy**: Heading levels, code blocks, and text sizing
+- **GPUI Integration**: Styled segments converted to GPUI TextRuns for rendering
+
+#### 4. **Coordinate System** (`core/coordinate_mapping.rs`, `rendering/coordinate_mapping.rs`)
+```
+Byte Offsets ↔ Point (Line/Column) ↔ Screen Coordinates ↔ Mouse Position
+```
+- **Unified Mapping**: Consistent coordinate translation between text, layout, and screen space
+- **Rope Integration**: Efficient line/column calculations using rope data structure
+- **Mouse Positioning**: Accurate click-to-cursor positioning with typography awareness
+- **Selection Bounds**: Precise visual selection highlighting across hybrid rendering modes
+
+#### 5. **GPUI Integration** (`editor/element.rs`, `editor/rendering.rs`)
+```
+TextRuns → GPUI Element → Window Rendering → User Interface
+```
+- **Custom Element**: Implements GPUI Element trait for advanced text rendering control
+- **Focus Management**: Integrates with GPUI focus system for keyboard input handling
+- **Event Delegation**: Mouse and keyboard events processed through GPUI's event system
+- **Performance Optimization**: Efficient text shaping and rendering with minimal redraws
+
+### Key System Interactions
+
+#### **Edit Operation Flow**
+1. User types character → Keyboard event captured
+2. InputRouter converts to InsertChar action
+3. TextDocument updates rope structure (O(log n))
+4. Cursor position updated using Point system
+5. MarkdownParser re-parses affected region
+6. HybridRenderer determines new render modes
+7. GPUI rerenders affected text runs
+8. Screen updates with new content
+
+#### **Mode Switching Flow**
+1. Cursor moves → Position change detected
+2. HybridRenderer evaluates all token positions
+3. Tokens near cursor switch to raw mode
+4. Tokens far from cursor switch to preview mode
+5. StyleContext applies appropriate themes
+6. TextRunGenerator creates new styled segments
+7. GPUI updates display with smooth transition
+
+#### **Mouse Click Flow**
+1. Mouse click → GPUI screen coordinates
+2. CoordinateMapper converts to text position
+3. Typography system accounts for font sizing
+4. Point system determines line/column
+5. TextDocument updates cursor position
+6. UI rerenders with new cursor placement
+
+### Performance Characteristics
+
+- **Text Operations**: O(log n) complexity for documents up to 10MB+
+- **Rendering**: Incremental updates only for changed regions
+- **Coordinate Mapping**: Cached calculations for repeated operations
+- **Memory Usage**: Rope structure provides efficient memory utilization
+- **Response Time**: <10ms for all interactive operations
+
+### Module Responsibilities
+
+- **`core/`**: Pure business logic, no UI dependencies
+- **`input/`**: User interaction abstraction, converts events to actions  
+- **`rendering/`**: Display logic, no business logic dependencies
+- **`editor/`**: GPUI integration, coordinates between layers
+- **`hybrid_renderer.rs`**: High-level rendering orchestration
+
+This architecture ensures clean separation of concerns, testability, and maintainability while delivering high-performance text editing with smooth hybrid preview/raw mode transitions.
 
 ## Current Features & Components
 
@@ -285,23 +412,37 @@ wonder-editor/
 - **Text Selection**: Full selection support with Shift+arrow keys and visual highlighting
 - **Rope-based Text Operations**: O(log n) performance for large documents (ENG-144 to ENG-147)
 - **Performance Benchmarking**: Comprehensive performance testing infrastructure (ENG-148)
-- **Markdown Parsing**: Supports headings, bold, italic, code, links, lists, blockquotes
-- **GPUI Integration**: Custom text rendering with mixed font styles and highlighting
-- **Command System**: Extensible command pattern for all text operations
+- **Unified Coordinate System**: Point-based positioning with accurate mouse-to-text mapping (ENG-173)
+- **Typography Hierarchy**: Multi-level heading system with proper font sizing (ENG-168)
+- **Theme-Aware Styling**: Context-aware styling system with dark/light theme support (ENG-165)
+- **Modular Rendering Architecture**: Separated concerns with dedicated rendering modules
+- **Markdown Parsing**: Supports headings, bold, italic, code, links, lists, blockquotes with emoji support (ENG-163)
+- **Highlight Text Support**: Advanced text highlighting capabilities (ENG-155)
+- **GPUI Integration**: Custom Element implementation with advanced text rendering control
+- **Action-based Input System**: Extensible command pattern with centralized input routing
 - **Zero-copy Rendering**: Efficient RopeSlice integration for optimal memory usage
+- **Mouse Positioning Accuracy**: Precise click-to-cursor positioning with typography awareness
 
-### Core Components (All Test-Driven - 154 Tests)
+### Core Components (All Test-Driven - 150+ Tests)
 - **TextDocument** (21 tests) - Rope-based text operations, cursor management, selection (O(log n))
 - **PerformanceBenchmark** (4 tests) - Performance testing infrastructure and validation (ENG-148)
 - **HybridTextRenderer** (9 tests) - Preview/raw mode switching logic (rope optimized)
-- **KeyboardHandler** (5 tests) - Input event processing
-- **EditorCommand** (13 tests) - Command pattern for operations including selection
-- **MarkdownParser** (13 tests) - Markdown tokenization with positioning
-- **Cursor** (5 tests) - Position management
-- **Selection** (4 tests) - Selection state management
-- **InputEvent** (2 tests) - Input event types
-- **Editor Integration** (12 tests) - UI layer behavior and selection highlighting
+- **Coordinate System** (10+ tests) - Point-based positioning and unified coordinate mapping (ENG-173)
+- **Rendering Modules** (15+ tests) - Modular rendering system with typography and styling
+- **Input System** (8+ tests) - Action-based input routing and command dispatch
+- **MarkdownParser** (15+ tests) - Enhanced markdown tokenization with emoji and highlight support
+- **Cursor & Selection** (9 tests) - Position management and selection state with Point integration
+- **Mouse Positioning** (6+ tests) - Accurate mouse-to-text coordinate mapping
+- **Editor Integration** (15+ tests) - UI layer behavior with custom Element implementation
+- **Typography System** (5+ tests) - Hierarchical font sizing and theme-aware styling
 - **Application** (1 test) - Main application component testing
+
+**Recent Architecture Improvements:**
+- Modular rendering system with separated concerns
+- Point-based coordinate system for accurate positioning
+- Theme-aware styling with context management
+- Enhanced mouse positioning accuracy
+- Improved typography hierarchy system
 
 ## Linear Integration & Workflow
 
@@ -515,21 +656,28 @@ cargo build --release
 
 ## Codebase Health Status ✅
 
-### Recently Completed (2025) - Rope Migration Success
+### Recently Completed (2025) - Architecture & Coordinate System Success
+- **Modular Architecture Complete**: Refactored rendering system into focused, single-responsibility modules
+- **Unified Coordinate System**: Point-based positioning with accurate mouse-to-text mapping (ENG-173)
+- **Typography Hierarchy**: Multi-level heading system with proper font sizing (ENG-168)
+- **Theme-Aware Styling**: Context-aware styling system with dark/light theme support (ENG-165)
+- **Mouse Positioning Accuracy**: Comprehensive fixes for click-to-cursor positioning accuracy
 - **Rope Migration Complete**: String → Rope data structure (ENG-144 to ENG-148)
 - **Performance Optimizations**: O(n) → O(log n) for all text operations
 - **Zero-copy Rendering**: RopeSlice integration with hybrid renderer
+- **Enhanced Markdown Support**: Emoji parsing (ENG-163) and highlight text support (ENG-155)
 - **Comprehensive Benchmarking**: 28 performance operations validated <10ms
-- **Architecture Enhanced**: Added performance testing layer
-- **Test Coverage Increased**: 150 → 154 tests (100% passing)
+- **Architecture Enhanced**: Added performance testing layer + modular rendering system
+- **Test Coverage Enhanced**: 150+ tests with expanded coordinate system and rendering coverage
 
 ### Current Quality Metrics  
-- **Tests**: 154 tests, 100% passing ✅
+- **Tests**: 150+ tests, 100% passing ✅
 - **Performance**: All operations <10ms (8.4M ops/sec peak) ✅  
 - **Compilation**: Clean with no errors ✅
-- **Warnings**: 12 (only related to future functionality, not dead code) ✅
-- **Architecture**: SOLID principles + performance layer ✅
-- **Features**: Rope-optimized hybrid rendering and selection highlighting ✅
+- **Architecture**: SOLID principles + modular rendering + unified coordinates ✅
+- **Features**: Advanced hybrid rendering with accurate mouse positioning ✅
+- **Coordinate System**: Point-based positioning with sub-pixel accuracy ✅
+- **Rendering**: Modular, theme-aware system with typography hierarchy ✅
 - **Scalability**: Handles 10MB+ documents with <5ms response time ✅
 
 ## Future Development Priorities
