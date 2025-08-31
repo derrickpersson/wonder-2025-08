@@ -1,3 +1,4 @@
+pub(self) mod cursor_diagnostics;
 pub(self) mod element;
 mod gpui_traits;
 mod keyboard;

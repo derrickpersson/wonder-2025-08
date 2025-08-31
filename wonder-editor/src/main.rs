@@ -2,6 +2,7 @@ mod app;
 mod editor;
 mod markdown_parser;
 mod hybrid_renderer;
+mod rendering;
 mod core;
 mod input;
 mod benchmarks;
