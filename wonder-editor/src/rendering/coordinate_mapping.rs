@@ -66,9 +66,13 @@ impl CoordinateMapper {
         
         // Get tokens and their render modes
         let tokens = self.parser.parse_with_positions(&content_str);
+        eprintln!("DEBUG COORD: Parsing content: {:?}", content_str);
+        eprintln!("DEBUG COORD: Found {} tokens", tokens.len());
         let token_modes: Vec<(ParsedToken, TokenRenderMode)> = tokens.into_iter()
             .map(|token| {
+                eprintln!("DEBUG COORD: Token {:?} at [{}, {}]", token.token_type, token.start, token.end);
                 let mode = TokenRenderMode::get_for_token(&token, cursor_position, selection_range.clone());
+                eprintln!("DEBUG COORD: Cursor at {}, token mode: {:?}", cursor_position, mode);
                 (token, mode)
             })
             .collect();
@@ -111,13 +115,17 @@ impl CoordinateMapper {
                 },
                 (MarkdownToken::Heading(_, text), TokenRenderMode::Preview) => {
                     // Heading in preview mode (no # symbols)
+                    eprintln!("DEBUG COORD: Heading in preview mode, text: {:?}", text);
                     text.clone()
                 },
                 _ => {
                     // Raw mode or unsupported token: show original
-                    content_str[token.start..token.end].to_string()
+                    let original = content_str[token.start..token.end].to_string();
+                    eprintln!("DEBUG COORD: Raw mode or unsupported, using original: {:?}", original);
+                    original
                 }
             };
+            eprintln!("DEBUG COORD: Display content for token: {:?}", display_content);
             
             // Map positions for this token
             let token_original_chars = token.end - token.start;
@@ -182,6 +190,15 @@ impl CoordinateMapper {
             }
         }
         
+        // CRITICAL FIX: Always add a mapping for the position after the last character
+        // This handles cursor positions at the end of tokens/content
+        original_to_display.push(display_pos);
+        if !display_to_original.is_empty() {
+            display_to_original.push(original_pos);
+        }
+        
+        eprintln!("DEBUG COORD: Final coordinate map - {} original->display mappings", original_to_display.len());
+        
         CoordinateMap {
             original_to_display,
             display_to_original,
@@ -196,11 +213,17 @@ impl CoordinateMapper {
         original_cursor_pos: usize, 
         selection: Option<Range<usize>>
     ) -> usize {
+        eprintln!("DEBUG MAP_CURSOR: Mapping cursor position {} to display", original_cursor_pos);
         let coordinate_map = self.create_coordinate_map(content, original_cursor_pos, selection);
+        eprintln!("DEBUG MAP_CURSOR: Coordinate map has {} original->display mappings", coordinate_map.original_to_display.len());
         if original_cursor_pos < coordinate_map.original_to_display.len() {
-            coordinate_map.original_to_display[original_cursor_pos]
+            let display_pos = coordinate_map.original_to_display[original_cursor_pos];
+            eprintln!("DEBUG MAP_CURSOR: Original pos {} maps to display pos {}", original_cursor_pos, display_pos);
+            display_pos
         } else {
-            coordinate_map.original_to_display.last().copied().unwrap_or(0)
+            let fallback = coordinate_map.original_to_display.last().copied().unwrap_or(0);
+            eprintln!("DEBUG MAP_CURSOR: Position {} out of bounds, using fallback {}", original_cursor_pos, fallback);
+            fallback
         }
     }
     

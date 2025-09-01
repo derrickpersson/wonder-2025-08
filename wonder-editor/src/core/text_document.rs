@@ -181,6 +181,9 @@ impl TextDocument {
 
     // Text modification
     pub fn insert_char(&mut self, ch: char) {
+        eprintln!("DEBUG: insert_char called with '{}'", ch);
+        eprintln!("DEBUG: Current cursor position before insert: {}", self.cursor.position());
+        
         if self.has_selection() {
             self.delete_selection();
         }
@@ -188,7 +191,15 @@ impl TextDocument {
         let position = self.cursor.position();
         self.content.insert_char(position, ch);
         let max_position = self.content.len_chars();
-        self.cursor.set_position((position + 1).min(max_position));
+        let new_position = (position + 1).min(max_position);
+        
+        eprintln!("DEBUG: Setting cursor position to: {} (was: {})", new_position, position);
+        self.cursor.set_position(new_position);
+        eprintln!("DEBUG: Cursor position after set: {}", self.cursor.position());
+        
+        // Debug: Check what the cursor thinks its position is
+        eprintln!("DEBUG: Cursor internal state - position: {}, point: {:?}", 
+                  self.cursor.position(), self.cursor.point());
     }
 
     pub fn insert_text(&mut self, text: &str) {
@@ -244,11 +255,41 @@ impl TextDocument {
 
     // Cursor movement
     pub fn move_cursor_left(&mut self) {
+        let before = self.cursor.position();
+        let (line, col) = self.get_cursor_line_and_column();
+        eprintln!("DEBUG: move_cursor_left - Before: pos={}, line={}, col={}", before, line, col);
+        
         self.cursor.move_left();
+        
+        let after = self.cursor.position();
+        let (line_after, col_after) = self.get_cursor_line_and_column();
+        eprintln!("DEBUG: move_cursor_left - After: pos={}, line={}, col={}", after, line_after, col_after);
     }
 
     pub fn move_cursor_right(&mut self) {
-        self.cursor.move_right(self.content.len_chars());
+        let before = self.cursor.position();
+        let (line, col) = self.get_cursor_line_and_column();
+        let max_pos = self.content.len_chars();
+        eprintln!("DEBUG: move_cursor_right - Before: pos={}, line={}, col={}, max={}", before, line, col, max_pos);
+        
+        // Check if we're at end of line
+        if line < self.content.len_lines() {
+            let line_slice = self.content.line(line);
+            let line_len = line_slice.len_chars();
+            let line_content_len = if line_len > 0 && line_slice.char(line_len - 1) == '\n' {
+                line_len - 1
+            } else {
+                line_len
+            };
+            eprintln!("DEBUG: Line {} has length {} (content: {})", line, line_len, line_content_len);
+            eprintln!("DEBUG: At column {}, line ends at column {}", col, line_content_len);
+        }
+        
+        self.cursor.move_right(max_pos);
+        
+        let after = self.cursor.position();
+        let (line_after, col_after) = self.get_cursor_line_and_column();
+        eprintln!("DEBUG: move_cursor_right - After: pos={}, line={}, col={}", after, line_after, col_after);
     }
 
     // Selection extension methods

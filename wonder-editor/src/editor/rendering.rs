@@ -238,19 +238,27 @@ impl EditorElement {
         let original_cursor_position = self.editor.read(cx).cursor_position();
         let content = &self.content;
         
+        eprintln!("DEBUG RENDER: Painting cursor at original position: {}", original_cursor_position);
+        eprintln!("DEBUG RENDER: Content length: {}", content.len());
+        
         // Map cursor position to transformed content coordinates
         let transformed_cursor_position = self.hybrid_renderer.map_cursor_position(
             content.as_str(), 
             original_cursor_position, 
             self.selection.clone()
         );
+        
+        eprintln!("DEBUG RENDER: Transformed cursor position: {}", transformed_cursor_position);
 
         // Calculate which line the cursor is on based on ORIGINAL content (for line counting)
         let chars_before_cursor: String = content.chars().take(original_cursor_position).collect();
         let line_number = chars_before_cursor.matches('\n').count();
+        
+        eprintln!("DEBUG RENDER: Cursor is on line {} (0-based)", line_number);
 
         // Get the actual line content from original text
         let current_line_original = content.lines().nth(line_number).unwrap_or("");
+        eprintln!("DEBUG RENDER: Line content: {:?}", current_line_original);
         
         // Find cursor position within this specific line (original coordinates)
         let lines_before: Vec<&str> = chars_before_cursor.lines().collect();
@@ -381,6 +389,9 @@ impl EditorElement {
         // Create cursor bounds - a thin vertical line
         let cursor_x = bounds.origin.x + padding + cursor_x_offset;
         let cursor_y = bounds.origin.y + padding + (line_height * line_number as f32);
+        
+        eprintln!("DEBUG RENDER: Final cursor position - x: {:?}, y: {:?}", cursor_x, cursor_y);
+        eprintln!("DEBUG RENDER: Cursor x_offset: {:?}, padding: {:?}", cursor_x_offset, padding);
 
         let cursor_bounds = Bounds {
             origin: gpui::point(cursor_x, cursor_y),
