@@ -541,13 +541,26 @@ impl MarkdownParser {
                     if in_heading.is_some() || in_strong || in_emphasis || in_strikethrough || in_link || in_code_block || in_list_item || in_block_quote || in_table_cell || in_subscript || in_superscript {
                         current_text.push_str(&text);
                     } else {
-                        // Parse special tokens in text with positions (tags, highlights, emojis)
-                        let text_with_special = if text.contains("==") {
-                            self.parse_special_tokens_in_text_with_positions(&text, range.start)
+                        // Check if pulldown-cmark converted the text (e.g., ASCII quotes to smart quotes)
+                        let expected_length = range.end - range.start;
+                        let actual_length = text.len();
+                        
+                        if actual_length != expected_length {
+                            // Text was converted, use original range directly to avoid position mismatches
+                            tokens.push(ParsedToken {
+                                token_type: MarkdownToken::Text(text.to_string()),
+                                start: range.start,
+                                end: range.end,
+                            });
                         } else {
-                            self.parse_tags_and_emojis_in_text_with_positions(&text, range.start)
-                        };
-                        tokens.extend(text_with_special);
+                            // Text was not converted, safe to parse special tokens
+                            let text_with_special = if text.contains("==") {
+                                self.parse_special_tokens_in_text_with_positions(&text, range.start)
+                            } else {
+                                self.parse_tags_and_emojis_in_text_with_positions(&text, range.start)
+                            };
+                            tokens.extend(text_with_special);
+                        }
                     }
                 }
                 Event::FootnoteReference(label) => {
@@ -961,16 +974,16 @@ impl MarkdownParser {
         use unicode_segmentation::UnicodeSegmentation;
         let mut tokens = Vec::new();
         let mut current_text = String::new();
-        let mut current_pos = 0;
+        let mut text_start_pos = 0; // Track start of current accumulated text
+        let mut current_pos = 0;    // Track current byte position
         
         for grapheme in text.graphemes(true) {
             if self.is_emoji(grapheme) {
                 // Add accumulated text before emoji if any
                 if !current_text.is_empty() {
-                    let text_len = current_text.len();
                     tokens.push(ParsedToken {
                         token_type: MarkdownToken::Text(current_text.clone()),
-                        start: text_start + current_pos - text_len,
+                        start: text_start + text_start_pos,
                         end: text_start + current_pos,
                     });
                     current_text.clear();
@@ -982,7 +995,14 @@ impl MarkdownParser {
                     start: text_start + current_pos,
                     end: text_start + current_pos + grapheme.len(),
                 });
+                
+                // Update text_start_pos for next text segment
+                text_start_pos = current_pos + grapheme.len();
             } else {
+                // If starting a new text segment, record its start position
+                if current_text.is_empty() {
+                    text_start_pos = current_pos;
+                }
                 current_text.push_str(grapheme);
             }
             current_pos += grapheme.len();
@@ -990,10 +1010,9 @@ impl MarkdownParser {
         
         // Add any remaining text
         if !current_text.is_empty() {
-            let text_len = current_text.len();
             tokens.push(ParsedToken {
                 token_type: MarkdownToken::Text(current_text),
-                start: text_start + current_pos - text_len,
+                start: text_start + text_start_pos,
                 end: text_start + current_pos,
             });
         }
@@ -1739,6 +1758,66 @@ mod tests {
         assert!(highlight_tokens.contains(&"highlighted text"));
     }
 
+    #[test]
+    fn test_pulldown_cmark_ranges() {
+        // Debug what pulldown-cmark gives us directly
+        let content = "Testing with special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?";
+        let options = pulldown_cmark::Options::all();
+        let parser = pulldown_cmark::Parser::new_ext(content, options);
+        let offset_iter = parser.into_offset_iter();
+        
+        println!("DEBUG: Raw pulldown-cmark events:");
+        for (event, range) in offset_iter {
+            let text_at_range = if range.start < content.len() && range.end <= content.len() {
+                &content[range.start..range.end]
+            } else {
+                "<invalid range>"
+            };
+            println!("Event: {:?} at {:?} = {:?}", event, range, text_at_range);
+        }
+    }
+    
+    #[test]
+    fn test_special_characters_token_positions() {
+        let parser = MarkdownParser::new();
+        let content = "Testing with special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?";
+        
+        let tokens = parser.parse_with_positions(content);
+        
+        // Print debug info
+        println!("Parsing content: {:?}", content);
+        for token in &tokens {
+            let token_text = &content[token.start..token.end];
+            println!("Token {:?} at [{}..{}] = {:?}", token.token_type, token.start, token.end, token_text);
+        }
+        
+        // Verify no overlapping tokens
+        for i in 0..tokens.len() {
+            for j in i + 1..tokens.len() {
+                let token_a = &tokens[i];
+                let token_b = &tokens[j];
+                
+                // Check for overlaps
+                let overlap = !(token_a.end <= token_b.start || token_b.end <= token_a.start);
+                assert!(!overlap, 
+                    "Overlapping tokens found: Token {} [{}, {}) and Token {} [{}, {})", 
+                    i, token_a.start, token_a.end, j, token_b.start, token_b.end);
+            }
+        }
+        
+        // Verify tokens cover the entire content without gaps or overlaps
+        if !tokens.is_empty() {
+            assert_eq!(tokens[0].start, 0, "First token should start at position 0");
+            assert_eq!(tokens.last().unwrap().end, content.len(), "Last token should end at content length");
+            
+            for i in 1..tokens.len() {
+                assert_eq!(tokens[i-1].end, tokens[i].start, 
+                    "Gap or overlap between tokens {} and {}: {}..{} vs {}..{}", 
+                    i-1, i, tokens[i-1].start, tokens[i-1].end, tokens[i].start, tokens[i].end);
+            }
+        }
+    }
+    
     #[test]
     fn test_parse_multiple_highlights() {
         let parser = MarkdownParser::new();
