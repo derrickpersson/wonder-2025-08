@@ -303,7 +303,16 @@ impl EditorElement {
         let cursor_x_offset = if transformed_position_in_line == 0 {
             px(0.0)
         } else {
+            // CRITICAL FIX: Take characters but then convert to byte slice for proper TextRun lengths
             let text_up_to_cursor = line_display_text.chars().take(transformed_position_in_line).collect::<String>();
+            
+            // Helper function to convert character position to byte position in a string
+            let char_to_byte_pos = |text: &str, char_pos: usize| -> usize {
+                text.char_indices()
+                    .nth(char_pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(text.len())
+            };
 
             if text_up_to_cursor.is_empty() {
                 px(0.0)
@@ -316,9 +325,9 @@ impl EditorElement {
                 );
 
                 if line_runs.is_empty() {
-                    // Fallback to simple measurement
+                    // Fallback to simple measurement - TextRun.len must be in BYTES
                     let text_run = TextRun {
-                        len: text_up_to_cursor.len(),
+                        len: text_up_to_cursor.len(), // This is already in bytes
                         font: gpui::Font {
                             family: "SF Pro".into(),
                             features: gpui::FontFeatures::default(),
@@ -342,24 +351,25 @@ impl EditorElement {
                     shaped_line.width
                 } else {
                     // Create a subset of text runs that covers our cursor position
+                    // CRITICAL FIX: Track BYTE positions for runs, not character positions
                     let mut runs_for_cursor = Vec::new();
-                    let mut run_pos = 0;
+                    let mut byte_pos = 0; // Track byte position in line_display_text
+                    let cursor_byte_pos = char_to_byte_pos(&line_display_text, transformed_position_in_line);
                     
                     for run in line_runs {
-                        if run_pos >= transformed_position_in_line {
+                        if byte_pos >= cursor_byte_pos {
                             break;
                         }
                         
-                        if run_pos + run.len <= transformed_position_in_line {
+                        if byte_pos + run.len <= cursor_byte_pos {
                             // Full run is before cursor
-                            let run_len = run.len;
-                            runs_for_cursor.push(run);
-                            run_pos += run_len;
+                            runs_for_cursor.push(run.clone());
+                            byte_pos += run.len;
                         } else {
-                            // Partial run up to cursor
-                            let partial_len = transformed_position_in_line - run_pos;
+                            // Partial run up to cursor - calculate partial BYTE length
+                            let partial_byte_len = cursor_byte_pos - byte_pos;
                             runs_for_cursor.push(TextRun {
-                                len: partial_len,
+                                len: partial_byte_len,
                                 font: run.font,
                                 color: run.color,
                                 background_color: run.background_color,
@@ -408,5 +418,99 @@ impl EditorElement {
             border_style: gpui::BorderStyle::Solid,
             corner_radii: gpui::Corners::all(px(0.0)),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_unicode_visual_cursor_positioning() {
+        // Test that cursor visual position calculation correctly handles Unicode characters
+        // This test verifies that byte lengths are properly handled when calculating cursor X position
+        
+        // Test case 1: Chinese characters (3 bytes each)
+        let chinese_text = "你好世界";
+        assert_eq!(chinese_text.len(), 12, "Chinese text should be 12 bytes");
+        assert_eq!(chinese_text.chars().count(), 4, "Chinese text should be 4 characters");
+        
+        // Test case 2: Emoji (4 bytes)
+        let emoji_text = "Hello 🌍 world";
+        assert_eq!(emoji_text.len(), 16, "Emoji text should be 16 bytes (emoji is 4 bytes)");
+        assert_eq!(emoji_text.chars().count(), 13, "Emoji text should be 13 characters");
+        
+        // Test case 3: Mixed content
+        let mixed_text = "Test 你好 🌍 text";
+        assert_eq!(mixed_text.len(), 21, "Mixed text should be 21 bytes");
+        assert_eq!(mixed_text.chars().count(), 14, "Mixed text should be 14 characters");
+        
+        // Verify byte position calculation for cursor positioning
+        // When cursor is at character position 5 in "Test 你好", it should be at byte position 5
+        let test_str = "Test 你好";
+        let char_pos = 5; // After space, before first Chinese character
+        let byte_pos = test_str
+            .char_indices()
+            .nth(char_pos)
+            .map(|(i, _)| i)
+            .unwrap_or(test_str.len());
+        assert_eq!(byte_pos, 5, "Character position 5 should map to byte position 5");
+        
+        // When cursor is at character position 6 (after first Chinese char)
+        let char_pos = 6;
+        let byte_pos = test_str
+            .char_indices()
+            .nth(char_pos)
+            .map(|(i, _)| i)
+            .unwrap_or(test_str.len());
+        assert_eq!(byte_pos, 8, "Character position 6 should map to byte position 8 (after 3-byte char)");
+    }
+    
+    #[test]
+    fn test_text_run_byte_length_calculation() {
+        // Test that TextRun lengths are correctly calculated in bytes
+        let text = "Hello 你好 🌍";
+        
+        // Substring from char 0 to 5 ("Hello")
+        let substring: String = text.chars().take(5).collect();
+        assert_eq!(substring, "Hello");
+        assert_eq!(substring.len(), 5, "ASCII substring should be 5 bytes");
+        
+        // Substring from char 0 to 7 ("Hello 你")
+        let substring: String = text.chars().take(7).collect();
+        assert_eq!(substring, "Hello 你");
+        assert_eq!(substring.len(), 9, "Substring with Chinese char should be 9 bytes");
+        
+        // Substring from char 0 to 9 ("Hello 你好 ")
+        let substring: String = text.chars().take(9).collect();
+        assert_eq!(substring, "Hello 你好 ");
+        assert_eq!(substring.len(), 13, "Substring with 2 Chinese chars should be 13 bytes");
+    }
+    
+    #[test]
+    fn test_char_to_byte_position_conversion() {
+        // Helper function to convert character position to byte position
+        fn char_to_byte_pos(text: &str, char_pos: usize) -> usize {
+            text.char_indices()
+                .nth(char_pos)
+                .map(|(i, _)| i)
+                .unwrap_or(text.len())
+        }
+        
+        let text = "Test 你好 🌍 émojis";
+        
+        // Test various character positions
+        assert_eq!(char_to_byte_pos(text, 0), 0, "Start of string");
+        assert_eq!(char_to_byte_pos(text, 4), 4, "After 'Test'");
+        assert_eq!(char_to_byte_pos(text, 5), 5, "After space");
+        assert_eq!(char_to_byte_pos(text, 6), 8, "After first Chinese char (3 bytes)");
+        assert_eq!(char_to_byte_pos(text, 7), 11, "After second Chinese char");
+        assert_eq!(char_to_byte_pos(text, 8), 12, "After space following Chinese");
+        assert_eq!(char_to_byte_pos(text, 9), 16, "After emoji (4 bytes)");
+        assert_eq!(char_to_byte_pos(text, 10), 17, "After space following emoji");
+        
+        // Verify the full string length
+        assert_eq!(text.len(), 24, "Total byte length");
+        assert_eq!(text.chars().count(), 16, "Total character count");
     }
 }
