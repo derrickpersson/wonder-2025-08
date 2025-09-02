@@ -54,6 +54,43 @@ impl CoordinateMapper {
         }
     }
     
+    /// Convert a byte position to a character position within the given content
+    fn byte_to_char_position(content: &str, byte_pos: usize) -> usize {
+        if byte_pos == 0 { return 0; }
+        if byte_pos >= content.len() { return content.chars().count(); }
+        
+        // Count characters up to the byte position
+        let mut char_count = 0;
+        let mut byte_count = 0;
+        
+        for ch in content.chars() {
+            if byte_count >= byte_pos {
+                break;
+            }
+            byte_count += ch.len_utf8();
+            char_count += 1;
+        }
+        
+        char_count
+    }
+    
+    /// Convert a byte range to character count
+    fn byte_range_to_char_count(content: &str, start_byte: usize, end_byte: usize) -> usize {
+        if start_byte >= end_byte || start_byte >= content.len() {
+            return 0;
+        }
+        
+        let safe_start = start_byte.min(content.len());
+        let safe_end = end_byte.min(content.len());
+        
+        // Extract the slice and count characters
+        if let Some(slice) = content.get(safe_start..safe_end) {
+            slice.chars().count()
+        } else {
+            0
+        }
+    }
+    
     // ENG-173: Phase 2 - Create unified coordinate mapping system with token boundary tracking
     pub fn create_coordinate_map<T: TextContent>(
         &self, 
@@ -84,15 +121,16 @@ impl CoordinateMapper {
         let line_offsets = Vec::new(); // TODO: Implement line offset tracking
         
         let mut display_pos = 0;
-        let mut original_pos = 0;
-        let mut last_token_end = 0;
+        let mut original_pos = 0; // This tracks character positions
+        let mut last_token_end = 0; // This tracks byte positions
         
         // Process content character by character, tracking token boundaries
         for (token, mode) in &token_modes {
-            // Handle text before this token
+            // Handle text before this token (convert byte positions to character positions)
             if token.start > last_token_end {
                 let text_between = &content_str[last_token_end..token.start];
-                for _ in text_between.chars() {
+                let chars_between = text_between.chars().count();
+                for _ in 0..chars_between {
                     original_to_display.push(display_pos);
                     display_to_original.push(original_pos);
                     display_pos += 1;
@@ -127,8 +165,8 @@ impl CoordinateMapper {
             };
             eprintln!("DEBUG COORD: Display content for token: {:?}", display_content);
             
-            // Map positions for this token
-            let token_original_chars = token.end - token.start;
+            // Map positions for this token - CRITICAL FIX: Convert byte range to character count
+            let token_original_chars = Self::byte_range_to_char_count(&content_str, token.start, token.end);
             let display_chars = display_content.chars().count();
             
             // Track token boundary
@@ -156,24 +194,24 @@ impl CoordinateMapper {
                 // Map display positions back to original proportionally
                 for i in 0..display_chars {
                     if display_chars == 0 {
-                        display_to_original.push(token.start);
+                        display_to_original.push(original_pos);
                     } else {
                         let progress = i as f32 / display_chars as f32;
-                        let original_offset = (progress * (token.end - token.start) as f32) as usize;
-                        display_to_original.push(token.start + original_offset.min(token.end - token.start));
+                        let original_offset = (progress * token_original_chars as f32) as usize;
+                        display_to_original.push(original_pos + original_offset.min(token_original_chars.saturating_sub(1)));
                     }
                 }
                 
                 display_pos += display_chars;
-                original_pos = token.end;
+                original_pos += token_original_chars; // Advance by character count, not byte count
             } else {
                 // Raw mode: 1:1 mapping
                 for i in 0..token_original_chars {
                     original_to_display.push(display_pos + i);
-                    display_to_original.push(token.start + i);
+                    display_to_original.push(original_pos + i); // Use character position + offset
                 }
                 display_pos += token_original_chars;
-                original_pos = token.end;
+                original_pos += token_original_chars; // Advance by character count, not byte count
             }
             
             last_token_end = token.end;
@@ -345,6 +383,118 @@ mod tests {
         assert_eq!(display_pos, 0);
     }
     
+    #[test] 
+    fn test_unicode_character_counting_in_coordinate_mapping() {
+        let mapper = CoordinateMapper::new();
+        // This is the exact content from the debug output that shows the issue
+        let content = "Testing with unicode: 你好世界 🌍 émojis included";
+        
+        // First, let's understand what's happening
+        let char_count = content.chars().count();
+        let byte_count = content.len();
+        println!("DEBUG: Content: {:?}", content);
+        println!("DEBUG: Character count: {}, byte count: {}", char_count, byte_count);
+        
+        // The real issue: markdown parser uses BYTE positions, but we need CHARACTER positions
+        // Let's find the actual byte position where the cursor was in the debug output
+        let emoji_byte_pos = content.find("🌍").unwrap();
+        let emoji_char_pos = content.chars().take_while(|&c| content.as_ptr() as usize + content.find(c).unwrap_or(0) < content.as_ptr() as usize + emoji_byte_pos).count();
+        
+        println!("DEBUG: Emoji '🌍' at byte position: {}, char position: {}", emoji_byte_pos, emoji_char_pos);
+        
+        // The issue from the debug output: position 44 was a BYTE position that mapped to display position 33
+        // Let's test what actually happens when we get token positions from the parser
+        let tokens = mapper.parser.parse_with_positions(content);
+        println!("DEBUG: Tokens from parser:");
+        for token in &tokens {
+            let token_text = &content[token.start..token.end];
+            println!("  Token: {:?} at bytes {}..{} = {:?}", token.token_type, token.start, token.end, token_text);
+        }
+        
+        // Test the problematic case: when parser gives us byte position 44
+        // In the original debug, "Original pos 44 maps to display pos 33"
+        // Position 44 in bytes should be somewhere after the emoji
+        if byte_count > 44 {
+            let byte_pos = 44;
+            
+            // Convert byte position to character position (this is what we need to fix)
+            let char_pos = content.chars().take_while(|&c| {
+                let byte_offset = content.as_ptr() as usize + content.find(c).unwrap_or(0);
+                byte_offset < content.as_ptr() as usize + byte_pos
+            }).count();
+            
+            println!("DEBUG: Byte position {} corresponds to character position {}", byte_pos, char_pos);
+            
+            // Test both: current (wrong) implementation treats byte pos as char pos
+            let wrong_result = mapper.map_cursor_position(content, byte_pos, None);  // Treating byte pos as char pos
+            let correct_result = mapper.map_cursor_position(content, char_pos, None); // Using correct char pos
+            
+            println!("DEBUG: Byte pos {} treated as char pos -> display pos {}", byte_pos, wrong_result);
+            println!("DEBUG: Correct char pos {} -> display pos {}", char_pos, correct_result);
+            
+            // This should expose the issue - they should be different if there's a byte/char mismatch
+            assert_ne!(wrong_result, correct_result, "Treating byte position as character position should give different results for Unicode content");
+        }
+        
+        // Basic sanity checks
+        assert_ne!(char_count, byte_count, "Unicode content should have different byte and character counts");
+        assert!(char_count <= byte_count, "Character count should be <= byte count");
+    }
+    
+    #[test]
+    fn test_mixed_unicode_content_coordinate_mapping() {
+        let mapper = CoordinateMapper::new();
+        
+        // Test various Unicode content scenarios
+        let test_cases = vec![
+            // Simple ASCII (baseline)
+            ("Hello world", 5, 5),
+            // Chinese characters (3 bytes each)
+            ("你好", 1, 1), // After first character
+            // Mixed ASCII + Chinese
+            ("Hi 你好", 4, 4), // After "Hi " and before Chinese
+            // Emoji (4 bytes)
+            ("🌍 world", 1, 1), // After emoji
+            // Mixed content like the original issue
+            ("Test 你好 🌍 text", 7, 7), // After "Test 你好 " (space after Chinese)
+            ("Test 你好 🌍 text", 9, 9), // After emoji and space
+        ];
+        
+        for (content, char_pos, expected_display_pos) in test_cases {
+            println!("Testing: {:?} at char pos {}", content, char_pos);
+            let display_pos = mapper.map_cursor_position(content, char_pos, None);
+            assert_eq!(display_pos, expected_display_pos, 
+                "Failed for content {:?}: char pos {} should map to display pos {} (got {})", 
+                content, char_pos, expected_display_pos, display_pos);
+        }
+    }
+    
+    #[test]
+    fn test_byte_to_char_conversion_utilities() {
+        let content = "Test 你好 🌍 émojis";
+        
+        // Test the utility functions directly
+        assert_eq!(CoordinateMapper::byte_to_char_position(content, 0), 0);
+        assert_eq!(CoordinateMapper::byte_to_char_position(content, 5), 5); // After "Test "
+        
+        // Chinese characters start at byte 5, character 5
+        let chinese_byte_pos = content.find("你").unwrap();
+        let chinese_char_pos = CoordinateMapper::byte_to_char_position(content, chinese_byte_pos);
+        assert_eq!(chinese_char_pos, 5);
+        
+        // Test byte range to character count
+        let emoji_start = content.find("🌍").unwrap();
+        let emoji_end = emoji_start + "🌍".len();
+        let emoji_char_count = CoordinateMapper::byte_range_to_char_count(content, emoji_start, emoji_end);
+        assert_eq!(emoji_char_count, 1, "Emoji should count as 1 character despite being 4 bytes");
+        
+        // Test Chinese character range
+        let chinese_range_start = content.find("你").unwrap();
+        let chinese_range_end = chinese_range_start + "你好".len();
+        let chinese_char_count = CoordinateMapper::byte_range_to_char_count(content, chinese_range_start, chinese_range_end);
+        assert_eq!(chinese_char_count, 2, "Two Chinese characters should count as 2 characters despite being 6 bytes");
+    }
+
     #[test]
     fn test_coordinate_consistency_round_trip() {
         let mapper = CoordinateMapper::new();
