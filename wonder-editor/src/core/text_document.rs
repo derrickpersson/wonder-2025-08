@@ -686,6 +686,16 @@ impl ActionHandler for TextDocument {
                 self.delete_current_line();
                 true
             }
+            EditorAction::Undo => {
+                // TODO: This will be implemented in ENG-177
+                // For now, just return false to indicate no action taken
+                false
+            }
+            EditorAction::Redo => {
+                // TODO: This will be implemented in ENG-177  
+                // For now, just return false to indicate no action taken
+                false
+            }
         }
     }
 }

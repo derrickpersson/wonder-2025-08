@@ -265,6 +265,36 @@ impl Keymap {
             EditorAction::Paste
         );
         
+        // Undo/Redo operations (Cmd/Ctrl + Z, Shift+Cmd/Ctrl + Z)
+        self.bind(
+            KeyBinding::with_modifiers("z", Modifiers::cmd()),
+            EditorAction::Undo
+        );
+        self.bind(
+            KeyBinding::with_modifiers("z", Modifiers::cmd_shift()),
+            EditorAction::Redo
+        );
+        
+        // Also bind Ctrl versions for cross-platform support
+        self.bind(
+            KeyBinding::with_modifiers("z", Modifiers::ctrl()),
+            EditorAction::Undo
+        );
+        self.bind(
+            KeyBinding::with_modifiers("z", Modifiers::ctrl_shift()),
+            EditorAction::Redo
+        );
+        
+        // Alternative Redo shortcut (Ctrl/Cmd + Y) - common on Windows
+        self.bind(
+            KeyBinding::with_modifiers("y", Modifiers::cmd()),
+            EditorAction::Redo
+        );
+        self.bind(
+            KeyBinding::with_modifiers("y", Modifiers::ctrl()),
+            EditorAction::Redo
+        );
+        
         // Missing navigation shortcuts from ENG-133
         
         // Shift+Home/End - Extend selection to line boundaries
@@ -553,6 +583,50 @@ mod tests {
         assert_eq!(
             keymap.get(&ctrl_shift_down_binding),
             Some(&EditorAction::ExtendSelection(Movement::PageDown))
+        );
+        
+        // Test undo/redo keyboard shortcuts from ENG-176
+        
+        // Test Cmd+Z for undo (macOS)
+        let cmd_z_binding = KeyBinding::with_modifiers("z", Modifiers::cmd());
+        assert_eq!(
+            keymap.get(&cmd_z_binding),
+            Some(&EditorAction::Undo)
+        );
+        
+        // Test Ctrl+Z for undo (cross-platform)
+        let ctrl_z_binding = KeyBinding::with_modifiers("z", Modifiers::ctrl());
+        assert_eq!(
+            keymap.get(&ctrl_z_binding),
+            Some(&EditorAction::Undo)
+        );
+        
+        // Test Cmd+Shift+Z for redo (macOS)
+        let cmd_shift_z_binding = KeyBinding::with_modifiers("z", Modifiers::cmd_shift());
+        assert_eq!(
+            keymap.get(&cmd_shift_z_binding),
+            Some(&EditorAction::Redo)
+        );
+        
+        // Test Ctrl+Shift+Z for redo (cross-platform)
+        let ctrl_shift_z_binding = KeyBinding::with_modifiers("z", Modifiers::ctrl_shift());
+        assert_eq!(
+            keymap.get(&ctrl_shift_z_binding),
+            Some(&EditorAction::Redo)
+        );
+        
+        // Test alternative Cmd+Y for redo (macOS)
+        let cmd_y_binding = KeyBinding::with_modifiers("y", Modifiers::cmd());
+        assert_eq!(
+            keymap.get(&cmd_y_binding),
+            Some(&EditorAction::Redo)
+        );
+        
+        // Test alternative Ctrl+Y for redo (Windows/Linux)
+        let ctrl_y_binding = KeyBinding::with_modifiers("y", Modifiers::ctrl());
+        assert_eq!(
+            keymap.get(&ctrl_y_binding),
+            Some(&EditorAction::Redo)
         );
     }
 

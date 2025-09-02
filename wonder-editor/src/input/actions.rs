@@ -38,6 +38,10 @@ pub enum EditorAction {
     Copy,
     Cut,
     Paste,
+    
+    // Undo/Redo operations
+    Undo,
+    Redo,
 }
 
 #[derive(Debug, Clone, PartialEq)]
