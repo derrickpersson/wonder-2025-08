@@ -5,6 +5,7 @@ pub mod cursor;
 pub mod point;
 pub mod selection;
 pub mod text_document;
+pub mod test_undo_integration;
 
 pub use command_history::{CommandHistory, CommandTransaction, HistoryStats};
 pub use commands::{UndoableCommand, InsertCommand, DeleteCommand, ReplaceCommand};

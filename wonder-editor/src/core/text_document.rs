@@ -184,46 +184,62 @@ impl TextDocument {
 
     // Text modification
     pub fn insert_char(&mut self, ch: char) {
-        eprintln!("DEBUG: insert_char called with '{}'", ch);
-        eprintln!("DEBUG: Current cursor position before insert: {}", self.cursor.position());
-        
+        // Handle selection deletion first with command
         if self.has_selection() {
-            self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                let deleted_text = self.content.slice(start..end).to_string();
+                let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
+                self.execute_command_in_transaction(delete_command);
+            }
         }
         
+        // Create and execute insert command
         let position = self.cursor.position();
-        self.content.insert_char(position, ch);
+        let insert_command = Box::new(InsertCommand::new(position, ch.to_string()));
+        self.execute_command_in_transaction(insert_command);
+        
+        // Update cursor position
+        let new_position = position + 1;
         let max_position = self.content.len_chars();
-        let new_position = (position + 1).min(max_position);
-        
-        eprintln!("DEBUG: Setting cursor position to: {} (was: {})", new_position, position);
-        self.cursor.set_position(new_position);
-        eprintln!("DEBUG: Cursor position after set: {}", self.cursor.position());
-        
-        // Debug: Check what the cursor thinks its position is
-        eprintln!("DEBUG: Cursor internal state - position: {}, point: {:?}", 
-                  self.cursor.position(), self.cursor.point());
+        self.cursor.set_position(new_position.min(max_position));
     }
 
     pub fn insert_text(&mut self, text: &str) {
+        // Handle selection deletion first with command
         if self.has_selection() {
-            self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                let deleted_text = self.content.slice(start..end).to_string();
+                let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
+                self.execute_command_in_transaction(delete_command);
+            }
         }
         
+        // Create and execute insert command
         let position = self.cursor.position();
-        self.content.insert(position, text);
+        let insert_command = Box::new(InsertCommand::new(position, text.to_string()));
+        self.execute_command_in_transaction(insert_command);
+        
+        // Update cursor position
         let new_position = position + text.chars().count();
         self.cursor.set_position(new_position);
     }
 
     pub fn delete_char(&mut self) -> bool {
         if self.has_selection() {
-            return self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                let deleted_text = self.content.slice(start..end).to_string();
+                let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
+                self.execute_command_in_transaction(delete_command);
+                return true;
+            }
         }
         
         let position = self.cursor.position();
         if position < self.content.len_chars() {
-            self.content.remove(position..position + 1);
+            // Get the character that will be deleted
+            let deleted_char = self.content.slice(position..position + 1).to_string();
+            let delete_command = Box::new(DeleteCommand::new(position, position + 1, deleted_char));
+            self.execute_command_in_transaction(delete_command);
             true
         } else {
             false
@@ -232,12 +248,22 @@ impl TextDocument {
 
     pub fn backspace(&mut self) -> bool {
         if self.has_selection() {
-            return self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                let deleted_text = self.content.slice(start..end).to_string();
+                let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
+                self.execute_command_in_transaction(delete_command);
+                return true;
+            }
         }
         
         let position = self.cursor.position();
         if position > 0 {
-            self.content.remove(position - 1..position);
+            // Get the character that will be deleted
+            let deleted_char = self.content.slice(position - 1..position).to_string();
+            let delete_command = Box::new(DeleteCommand::new(position - 1, position, deleted_char));
+            self.execute_command_in_transaction(delete_command);
+            
+            // Update cursor position
             self.cursor.move_left();
             true
         } else {
@@ -1087,7 +1113,23 @@ impl TextDocument {
         // Execute the command
         let new_content = command.execute(&self.content);
         
-        // Add the command to history
+        // For direct execute_command calls, ensure each is individually undoable
+        // by finishing current transaction and starting a new one
+        self.command_history.finish_current_transaction();
+        self.command_history.add_command(command);
+        self.command_history.finish_current_transaction();
+        
+        // Apply the new content
+        self.content = new_content;
+        true
+    }
+    
+    /// Execute a command as part of a transaction (for user input)
+    fn execute_command_in_transaction(&mut self, command: Box<dyn UndoableCommand>) -> bool {
+        // Execute the command
+        let new_content = command.execute(&self.content);
+        
+        // Add to current transaction (will be grouped with other operations)
         self.command_history.add_command(command);
         
         // Apply the new content
@@ -1178,30 +1220,44 @@ impl RopeTextDocument {
     }
 
     pub fn insert_char(&mut self, ch: char) {
+        // Direct content manipulation - RopeTextDocument doesn't support commands
         if self.has_selection() {
-            self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                self.content.remove(start..end);
+                self.cursor.set_position(start);
+                self.selection.clear();
+            }
         }
         
         let position = self.cursor.position();
         self.content.insert_char(position, ch);
-        let max_position = self.content.len_chars();
-        self.cursor.set_position((position + 1).min(max_position));
+        self.cursor.set_position(position + 1);
     }
 
     pub fn insert_text(&mut self, text: &str) {
+        // Direct content manipulation - RopeTextDocument doesn't support commands
         if self.has_selection() {
-            self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                self.content.remove(start..end);
+                self.cursor.set_position(start);
+                self.selection.clear();
+            }
         }
         
         let position = self.cursor.position();
         self.content.insert(position, text);
-        let new_position = position + text.chars().count();
-        self.cursor.set_position(new_position);
+        self.cursor.set_position(position + text.chars().count());
     }
 
     pub fn delete_char(&mut self) -> bool {
+        // Direct content manipulation - RopeTextDocument doesn't support commands
         if self.has_selection() {
-            return self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                self.content.remove(start..end);
+                self.cursor.set_position(start);
+                self.selection.clear();
+                return true;
+            }
         }
         
         let position = self.cursor.position();
@@ -1214,8 +1270,14 @@ impl RopeTextDocument {
     }
 
     pub fn backspace(&mut self) -> bool {
+        // Direct content manipulation - RopeTextDocument doesn't support commands
         if self.has_selection() {
-            return self.delete_selection();
+            if let Some((start, end)) = self.selection_range() {
+                self.content.remove(start..end);
+                self.cursor.set_position(start);
+                self.selection.clear();
+                return true;
+            }
         }
         
         let position = self.cursor.position();
