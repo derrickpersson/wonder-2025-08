@@ -327,30 +327,31 @@ impl MarkdownEditor {
         self.measure_text_width_improved_approximation(text, font_size)
     }
     
-    /// ENG-183: Significantly improved character width approximation
+    /// ENG-183: Significantly improved character width approximation calibrated to GPUI output
     /// This reduces the cumulative error that causes positioning issues in long lines
     fn measure_text_width_improved_approximation(&self, text: &str, font_size: f32) -> f32 {
-        // Further refined character width coefficient - closer to actual monospace fonts
-        let base_char_width = font_size * 0.62; // Refined from 0.6 to 0.62
+        // Calibrated to actual GPUI TextSystem output: 538.0625px for 81 chars = 6.64px per char
+        // For 16px font: 6.64/16 = 0.415 coefficient (much lower than previous 0.62)
+        let base_char_width = font_size * 0.415; // Calibrated to match real GPUI output
         
-        // Refined character width categorization based on analyzing the failing test text
+        // Character width ratios calibrated to match GPUI TextSystem output
         let mut total_width = 0.0;
         for ch in text.chars() {
             let char_width = match ch {
-                // Very narrow characters  
-                'i' | 'l' | 'I' | '!' | '|' | '1' | 'f' | 'j' | 'r' => base_char_width * 0.55,
+                // Very narrow characters (keeping similar ratios but with new base)
+                'i' | 'l' | 'I' | '!' | '|' | '1' | 'f' | 'j' | 'r' => base_char_width * 0.8,
                 // Narrow punctuation  
-                '.' | ',' | ';' | ':' | '\'' | '"' | '`' | '?' => base_char_width * 0.5,
-                // Slightly narrow characters
-                't' | 'c' | 's' | 'a' | 'n' | 'e' => base_char_width * 0.85,
-                // Wide characters (further reduced for better fit)
-                'm' | 'M' | 'W' | 'w' | '@' | '#' => base_char_width * 1.0,
-                // Space (refined - this is critical for long lines with many words)
-                ' ' => base_char_width * 0.55,
+                '.' | ',' | ';' | ':' | '\'' | '"' | '`' | '?' => base_char_width * 0.7,
+                // Slightly narrow characters (less variation since base is now more accurate)
+                't' | 'c' | 's' | 'a' | 'n' | 'e' => base_char_width * 0.95,
+                // Wide characters (closer to base since base is now calibrated)
+                'm' | 'M' | 'W' | 'w' | '@' | '#' => base_char_width * 1.15,
+                // Space (critical for accuracy - calibrated to GPUI)
+                ' ' => base_char_width * 0.8,
                 // Tab
                 '\t' => base_char_width * 4.0,
-                // Most characters (refined baseline)
-                _ => base_char_width * 0.9,
+                // Most characters (close to base since it's now GPUI-calibrated)
+                _ => base_char_width,
             };
             total_width += char_width;
         }

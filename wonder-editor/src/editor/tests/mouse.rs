@@ -159,9 +159,9 @@ mod tests {
         let content = "Another very long line with lots of text to test positioning accuracy after long content. Does the cursor position correctly here?";
         let content_dot_end = content.find("content.").expect("Should find 'content.' in line") + "content.".len();
         
-        // Test character width calculation using the REFINED approximation logic (ENG-183)
+        // Test character width calculation using the CALIBRATED approximation logic (ENG-183)
         let base_font_size = 16.0;
-        let base_char_width = base_font_size * 0.62; // Further refined from 0.6 to 0.62
+        let base_char_width = base_font_size * 0.415; // Calibrated to match GPUI output (6.64px per char)
         
         // Calculate cumulative width errors for progressively longer text
         let mut cumulative_error = 0.0;
@@ -171,29 +171,29 @@ mod tests {
             if pos <= content.chars().count() {
                 let text_up_to_pos = content.chars().take(pos).collect::<String>();
                 
-                // Simulate the REFINED approximation from measure_text_width_improved_approximation
-                let mut refined_width = 0.0;
+                // Simulate the CALIBRATED approximation from measure_text_width_improved_approximation
+                let mut calibrated_width = 0.0;
                 for ch in text_up_to_pos.chars() {
                     let char_width = match ch {
-                        // Refined character width categorization (ENG-183)
-                        'i' | 'l' | 'I' | '!' | '|' | '1' | 'f' | 'j' | 'r' => base_char_width * 0.55, // Very narrow
-                        '.' | ',' | ';' | ':' | '\'' | '"' | '`' | '?' => base_char_width * 0.5,        // Narrow punctuation
-                        't' | 'c' | 's' | 'a' | 'n' | 'e' => base_char_width * 0.85,                    // Slightly narrow
-                        'm' | 'M' | 'W' | 'w' | '@' | '#' => base_char_width * 1.0,                     // Wide (further refined)
-                        ' ' => base_char_width * 0.55,                                                   // Space (refined)
+                        // Calibrated character width ratios (ENG-183)
+                        'i' | 'l' | 'I' | '!' | '|' | '1' | 'f' | 'j' | 'r' => base_char_width * 0.8,  // Very narrow
+                        '.' | ',' | ';' | ':' | '\'' | '"' | '`' | '?' => base_char_width * 0.7,        // Narrow punctuation
+                        't' | 'c' | 's' | 'a' | 'n' | 'e' => base_char_width * 0.95,                    // Slightly narrow
+                        'm' | 'M' | 'W' | 'w' | '@' | '#' => base_char_width * 1.15,                     // Wide
+                        ' ' => base_char_width * 0.8,                                                   // Space (calibrated)
                         '\t' => base_char_width * 4.0,                                                  // Tab
-                        _ => base_char_width * 0.9,                                                      // Refined baseline
+                        _ => base_char_width,                                                            // Calibrated baseline
                     };
-                    refined_width += char_width;
+                    calibrated_width += char_width;
                 }
                 
                 // Compare with simple uniform character width
                 let uniform_width = text_up_to_pos.chars().count() as f32 * base_char_width;
-                let error = (refined_width - uniform_width).abs();
+                let error = (calibrated_width - uniform_width).abs();
                 cumulative_error += error;
                 
-                println!("Position {}: refined={:.1}px, uniform={:.1}px, error={:.1}px, text='{}'",
-                        pos, refined_width, uniform_width, error, 
+                println!("Position {}: calibrated={:.1}px, uniform={:.1}px, error={:.1}px, text='{}'",
+                        pos, calibrated_width, uniform_width, error, 
                         if text_up_to_pos.len() > 50 { 
                             format!("{}...", &text_up_to_pos[..47]) 
                         } else { 
