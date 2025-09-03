@@ -92,6 +92,7 @@ impl Clone for CommandTransaction {
 }
 
 /// Command History Manager with undo/redo capabilities
+#[derive(Debug)]
 pub struct CommandHistory {
     undo_stack: VecDeque<CommandTransaction>,
     redo_stack: VecDeque<CommandTransaction>,

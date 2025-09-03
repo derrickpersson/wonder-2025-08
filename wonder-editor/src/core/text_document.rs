@@ -1,12 +1,13 @@
-use super::{cursor::Cursor, selection::Selection};
+use super::{cursor::Cursor, selection::Selection, command_history::CommandHistory, commands::{UndoableCommand, InsertCommand, DeleteCommand, ReplaceCommand}};
 use ropey::Rope;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TextDocument {
     content: Rope,
     cursor: Cursor,
     selection: Selection,
     clipboard: Option<String>,
+    command_history: CommandHistory,
 }
 
 impl TextDocument {
@@ -16,6 +17,7 @@ impl TextDocument {
             cursor: Cursor::new(),
             selection: Selection::new(),
             clipboard: None,
+            command_history: CommandHistory::new(),
         }
     }
 
@@ -27,6 +29,7 @@ impl TextDocument {
             cursor,
             selection: Selection::new(),
             clipboard: None,
+            command_history: CommandHistory::new(),
         }
     }
 
@@ -687,14 +690,10 @@ impl ActionHandler for TextDocument {
                 true
             }
             EditorAction::Undo => {
-                // TODO: This will be implemented in ENG-177
-                // For now, just return false to indicate no action taken
-                false
+                self.perform_undo()
             }
             EditorAction::Redo => {
-                // TODO: This will be implemented in ENG-177  
-                // For now, just return false to indicate no action taken
-                false
+                self.perform_redo()
             }
         }
     }
@@ -1056,6 +1055,55 @@ impl TextDocument {
         
         pos
     }
+    
+    /// Perform undo operation
+    pub fn perform_undo(&mut self) -> bool {
+        if let Some(new_content) = self.command_history.undo(&self.content) {
+            self.content = new_content;
+            // Move cursor to the beginning of the affected area
+            // For now, keep the cursor at its current position
+            // TODO: In ENG-178, we'll improve cursor positioning after undo
+            true
+        } else {
+            false
+        }
+    }
+    
+    /// Perform redo operation
+    pub fn perform_redo(&mut self) -> bool {
+        if let Some(new_content) = self.command_history.redo(&self.content) {
+            self.content = new_content;
+            // Move cursor to the end of the affected area
+            // For now, keep the cursor at its current position
+            // TODO: In ENG-178, we'll improve cursor positioning after redo
+            true
+        } else {
+            false
+        }
+    }
+    
+    /// Execute a command and add it to the history
+    pub fn execute_command(&mut self, command: Box<dyn UndoableCommand>) -> bool {
+        // Execute the command
+        let new_content = command.execute(&self.content);
+        
+        // Add the command to history
+        self.command_history.add_command(command);
+        
+        // Apply the new content
+        self.content = new_content;
+        true
+    }
+    
+    /// Check if undo is available
+    pub fn can_undo(&self) -> bool {
+        self.command_history.can_undo()
+    }
+    
+    /// Check if redo is available  
+    pub fn can_redo(&self) -> bool {
+        self.command_history.can_redo()
+    }
 }
 
 // ENG-144: RopeTextDocument for O(log n) performance
@@ -1195,6 +1243,7 @@ impl RopeTextDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::actions::EditorAction;
 
     #[test]
     fn test_text_document_creation() {
@@ -1720,5 +1769,109 @@ mod tests {
         
         doc.set_cursor_position(44); // Start of "Fifth line"
         assert_eq!(doc.get_cursor_line_and_column(), (4, 0)); // Line 4, column 0
+    }
+
+    #[test]
+    fn test_undo_redo_integration() {
+        let mut doc = TextDocument::new();
+        
+        // Initially no undo/redo available
+        assert!(!doc.can_undo());
+        assert!(!doc.can_redo());
+        
+        // Execute a command using the command system
+        let command = Box::new(InsertCommand::new(0, "Hello".to_string()));
+        assert!(doc.execute_command(command));
+        
+        assert_eq!(doc.content(), "Hello");
+        assert!(doc.can_undo());
+        assert!(!doc.can_redo());
+        
+        // Undo the command
+        assert!(doc.perform_undo());
+        assert_eq!(doc.content(), "");
+        assert!(!doc.can_undo());
+        assert!(doc.can_redo());
+        
+        // Redo the command
+        assert!(doc.perform_redo());
+        assert_eq!(doc.content(), "Hello");
+        assert!(doc.can_undo());
+        assert!(!doc.can_redo());
+    }
+
+    #[test]
+    fn test_multiple_commands_undo_redo() {
+        let mut doc = TextDocument::new();
+        
+        // Execute multiple commands
+        doc.execute_command(Box::new(InsertCommand::new(0, "Hello".to_string())));
+        doc.execute_command(Box::new(InsertCommand::new(5, " World".to_string())));
+        doc.execute_command(Box::new(InsertCommand::new(11, "!".to_string())));
+        
+        assert_eq!(doc.content(), "Hello World!");
+        
+        // Undo all commands
+        assert!(doc.perform_undo());
+        assert_eq!(doc.content(), "Hello World");
+        
+        assert!(doc.perform_undo());
+        assert_eq!(doc.content(), "Hello");
+        
+        assert!(doc.perform_undo());
+        assert_eq!(doc.content(), "");
+        
+        // No more undos available
+        assert!(!doc.perform_undo());
+        
+        // Redo commands
+        assert!(doc.perform_redo());
+        assert_eq!(doc.content(), "Hello");
+        
+        assert!(doc.perform_redo());
+        assert_eq!(doc.content(), "Hello World");
+        
+        assert!(doc.perform_redo());
+        assert_eq!(doc.content(), "Hello World!");
+        
+        // No more redos available
+        assert!(!doc.perform_redo());
+    }
+
+    #[test]
+    fn test_command_clears_redo_stack() {
+        let mut doc = TextDocument::new();
+        
+        // Execute and undo a command
+        doc.execute_command(Box::new(InsertCommand::new(0, "Hello".to_string())));
+        doc.perform_undo();
+        
+        assert!(doc.can_redo());
+        
+        // Execute a new command - should clear redo stack
+        doc.execute_command(Box::new(InsertCommand::new(0, "World".to_string())));
+        
+        assert!(!doc.can_redo());
+        assert_eq!(doc.content(), "World");
+    }
+
+    #[test]
+    fn test_undo_redo_actions() {
+        let mut doc = TextDocument::new();
+        
+        // Test that undo/redo actions return false when no history
+        assert!(!doc.handle_action(EditorAction::Undo));
+        assert!(!doc.handle_action(EditorAction::Redo));
+        
+        // Execute a command manually to have history
+        doc.execute_command(Box::new(InsertCommand::new(0, "Test".to_string())));
+        
+        // Now undo action should work
+        assert!(doc.handle_action(EditorAction::Undo));
+        assert_eq!(doc.content(), "");
+        
+        // Now redo action should work
+        assert!(doc.handle_action(EditorAction::Redo));
+        assert_eq!(doc.content(), "Test");
     }
 }
