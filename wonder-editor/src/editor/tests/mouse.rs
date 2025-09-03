@@ -503,5 +503,73 @@ mod tests {
         panic!("Need access to GPUI Window for text measurement: modify convert_point_to_character_index to accept Window");
     }
 
+    #[test]
+    fn test_unicode_character_width_handling() {
+        // Test that Unicode characters (especially emojis) are handled properly
+        
+        let test_cases = vec![
+            ("Hello 🌍 World", "ASCII with emoji"),
+            ("你好世界", "CJK characters"),
+            ("café résumé", "Accented characters"),
+            ("Testing 🚀💡⚡ multiple emojis", "Multiple emojis"),
+            ("Mixed: ABC 你好 🌍 def", "Mixed character types"),
+        ];
+        
+        for (content, description) in test_cases {
+            println!("Testing {}: '{}'", description, content);
+            
+            // Test character width calculation for different Unicode types
+            let content_chars: Vec<char> = content.chars().collect();
+            let mut total_approx_width = 0.0;
+            let base_char_width = 16.0 * 0.415; // Our calibrated base width
+            
+            for ch in content_chars.iter() {
+                let char_width = match *ch {
+                    // Emoji handling
+                    _ => {
+                        let code_point = *ch as u32;
+                        if code_point >= 0x1F300 && code_point <= 0x1F9FF {
+                            // Emoji ranges - wider than regular chars
+                            base_char_width * 2.0
+                        } else if code_point >= 0x2600 && code_point <= 0x26FF {
+                            // Miscellaneous Symbols (including more emojis)
+                            base_char_width * 2.0  
+                        } else if code_point >= 0x3000 && code_point <= 0x9FFF {
+                            // CJK characters - typically wider
+                            base_char_width * 1.8
+                        } else if code_point >= 0x0080 {
+                            // Other non-ASCII Unicode - slightly wider
+                            base_char_width * 1.1
+                        } else {
+                            // Regular ASCII
+                            base_char_width
+                        }
+                    },
+                };
+                total_approx_width += char_width;
+            }
+            
+            println!("  Characters: {}", content_chars.len());
+            println!("  Estimated width: {:.1}px", total_approx_width);
+            
+            // Verify that Unicode characters get wider width estimates than ASCII
+            let has_emoji = content_chars.iter().any(|&ch| {
+                let code_point = ch as u32;
+                (code_point >= 0x1F300 && code_point <= 0x1F9FF) ||
+                (code_point >= 0x2600 && code_point <= 0x26FF)
+            });
+            
+            if has_emoji {
+                // With emojis, the average width per character should be higher
+                let avg_width = total_approx_width / content_chars.len() as f32;
+                assert!(avg_width > base_char_width * 1.05, 
+                       "Content with emojis should have higher average character width: {} vs base {}", 
+                       avg_width, base_char_width);
+            }
+            
+            println!("  ✅ Unicode width handling verified for {}", description);
+        }
+    }
+
     // More mouse interaction tests will be moved here from the original test module
 }

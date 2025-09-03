@@ -300,7 +300,7 @@ impl MarkdownEditor {
         // Clamp row to valid range
         row = row.min((lines.len().saturating_sub(1)) as u32);
 
-        // Calculate column within the line using GPUI text measurement for pixel-perfect accuracy
+        // Calculate column using actual GPUI TextSystem measurement - handles Unicode/emojis perfectly!
         let line_content = lines[row as usize];
         let column = self.calculate_column_from_x_position_with_gpui(
             line_content,
@@ -343,6 +343,52 @@ impl MarkdownEditor {
         _line_start_pos: usize,
     ) -> Pixels {
         px(self.calculate_line_height_for_content_pixels(line_content))
+    }
+
+    // Calculate column position from X coordinate using GPUI text measurement - pixel perfect!
+    fn calculate_column_from_x_position_with_actual_measurement(
+        &self,
+        line_content: &str,
+        x_position: f32,
+        _row: u32,
+        window: &mut Window,
+    ) -> u32 {
+        if line_content.is_empty() || x_position <= 0.0 {
+            return 0;
+        }
+
+        // Use character-by-character GPUI measurement for perfect accuracy
+        let mut best_column = 0u32;
+        let mut min_distance = f32::MAX;
+        let line_chars: Vec<char> = line_content.chars().collect();
+
+        // Check position at each character boundary using actual GPUI measurement
+        for col in 0..=line_chars.len() {
+            // Measure actual text width up to this column using GPUI
+            let text_up_to_col = line_chars[..col].iter().collect::<String>();
+            let measured_width = self.measure_text_width_with_gpui(&text_up_to_col, line_content, window);
+
+            let distance = (measured_width - x_position).abs();
+
+            eprintln!(
+                "  🔍 Column {}: text='{}' width={:.1}px distance={:.1}px (GPUI measured)",
+                col,
+                text_up_to_col.replace('\n', "⏎"),
+                measured_width,
+                distance
+            );
+
+            if distance < min_distance {
+                min_distance = distance;
+                best_column = col as u32;
+            }
+        }
+
+        eprintln!(
+            "  ✅ Best column: {} (min_distance: {:.1}px) using actual GPUI measurement",
+            best_column, min_distance
+        );
+        best_column
     }
 
     // Calculate column position from X coordinate within a specific line using proper text measurement
@@ -391,7 +437,8 @@ impl MarkdownEditor {
     }
 
     // ENG-184: Calculate column position using GPUI TextSystem for pixel-perfect accuracy
-    // This replaces approximation with actual GPUI text measurement for precise cursor positioning
+    // This uses actual GPUI text measurement and closest_index_for_x() - no approximations!
+    // Handles Unicode characters, emojis, and variable-width fonts perfectly.
     fn calculate_column_from_x_position_with_gpui(
         &self,
         line_content: &str,
@@ -476,6 +523,53 @@ impl MarkdownEditor {
         character_index as u32
     }
 
+    // Measure actual text width using GPUI TextSystem - no approximations!
+    fn measure_text_width_with_gpui(&self, text: &str, line_content: &str, window: &mut Window) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+
+        // Determine font size for this line (headings use larger fonts)
+        let base_font_size = 16.0;
+        let font_size = if line_content.starts_with('#') {
+            let heading_level = line_content.chars().take_while(|&c| c == '#').count() as u32;
+            if heading_level <= 6 {
+                self.hybrid_renderer
+                    .get_scalable_font_size_for_heading_level(heading_level, base_font_size)
+            } else {
+                base_font_size
+            }
+        } else {
+            base_font_size
+        };
+
+        // Create text run for measurement (same as GPUI-based coordinate conversion)
+        let text_run = TextRun {
+            len: text.len(),
+            font: gpui::Font {
+                family: "SF Pro".into(),
+                features: gpui::FontFeatures::default(),
+                weight: gpui::FontWeight::NORMAL,
+                style: gpui::FontStyle::Normal,
+                fallbacks: None,
+            },
+            color: gpui::rgb(0xcdd6f4).into(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+
+        // Use GPUI TextSystem for exact measurement - same as in coordinate conversion
+        let shaped_line = window.text_system().shape_line(
+            text.to_string().into(),
+            gpui::px(font_size),
+            &[text_run],
+            None,
+        );
+
+        shaped_line.width.0
+    }
+
     // ENG-183: Measure text width with improved accuracy to fix cursor positioning bug
     fn measure_text_width(&self, text: &str, line_content: &str) -> f32 {
         if text.is_empty() {
@@ -508,6 +602,7 @@ impl MarkdownEditor {
 
     /// ENG-183: Significantly improved character width approximation calibrated to GPUI output
     /// This reduces the cumulative error that causes positioning issues in long lines
+    /// Now includes proper Unicode handling for emojis, CJK characters, and other wide characters
     fn measure_text_width_improved_approximation(&self, text: &str, font_size: f32) -> f32 {
         // Calibrated to actual GPUI TextSystem output: 538.0625px for 81 chars = 6.64px per char
         // For 16px font: 6.64/16 = 0.415 coefficient (much lower than previous 0.62)
@@ -529,8 +624,27 @@ impl MarkdownEditor {
                 ' ' => base_char_width * 0.8,
                 // Tab
                 '\t' => base_char_width * 4.0,
-                // Most characters (close to base since it's now GPUI-calibrated)
-                _ => base_char_width,
+                // Unicode handling - emojis and wide characters
+                _ => {
+                    // For Unicode characters (including emojis), use different width estimates
+                    let code_point = ch as u32;
+                    if code_point >= 0x1F300 && code_point <= 0x1F9FF {
+                        // Emoji ranges - typically much wider than regular chars
+                        base_char_width * 2.0
+                    } else if code_point >= 0x2600 && code_point <= 0x26FF {
+                        // Miscellaneous Symbols (including more emojis) - also wide
+                        base_char_width * 2.0  
+                    } else if code_point >= 0x3000 && code_point <= 0x9FFF {
+                        // CJK characters (Chinese, Japanese, Korean) - typically wider
+                        base_char_width * 1.8
+                    } else if code_point >= 0x0080 {
+                        // Other non-ASCII Unicode - slightly wider than ASCII on average
+                        base_char_width * 1.1
+                    } else {
+                        // Regular ASCII fallback
+                        base_char_width
+                    }
+                },
             };
             total_width += char_width;
         }
