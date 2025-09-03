@@ -64,12 +64,33 @@ impl TextDocument {
     }
 
     pub fn selection_range(&self) -> Option<(usize, usize)> {
-        self.selection.range(self.cursor.position())
+        // Ensure cursor position is within bounds before getting range
+        let cursor_pos = self.cursor.position().min(self.content.len_chars());
+        self.selection.range(cursor_pos).map(|(start, end)| {
+            // Ensure the range is within bounds of current content
+            let max_pos = self.content.len_chars();
+            let safe_start = start.min(max_pos);
+            let safe_end = end.min(max_pos);
+            (safe_start, safe_end)
+        })
+    }
+    
+    /// Safe rope slicing with bounds checking
+    fn safe_slice(&self, start: usize, end: usize) -> String {
+        let max_pos = self.content.len_chars();
+        let safe_start = start.min(max_pos);
+        let safe_end = end.min(max_pos).max(safe_start); // Ensure end >= start
+        
+        if safe_start == safe_end {
+            String::new()
+        } else {
+            self.content.slice(safe_start..safe_end).to_string()
+        }
     }
 
     pub fn selected_text(&self) -> Option<String> {
         self.selection_range().map(|(start, end)| {
-            self.content.slice(start..end).to_string()
+            self.safe_slice(start, end)
         })
     }
 
@@ -118,7 +139,7 @@ impl TextDocument {
 
     fn wrap_selection_with(&mut self, start_marker: &str, end_marker: &str) {
         if let Some((start, end)) = self.selection_range() {
-            let selected_content = self.content.slice(start..end).to_string();
+            let selected_content = self.safe_slice(start, end);
             let wrapped_content = format!("{}{}{}", start_marker, selected_content, end_marker);
             
             // Replace selected text with wrapped content
@@ -151,8 +172,8 @@ impl TextDocument {
                 return false;
             }
             
-            let before_selection = self.content.slice(start - start_marker_len..start).to_string();
-            let after_selection = self.content.slice(end..end + end_marker_len).to_string();
+            let before_selection = self.safe_slice(start.saturating_sub(start_marker_len), start);
+            let after_selection = self.safe_slice(end, end + end_marker_len);
             
             before_selection == start_marker && after_selection == end_marker
         } else {
@@ -187,7 +208,7 @@ impl TextDocument {
         // Handle selection deletion first with command
         if self.has_selection() {
             if let Some((start, end)) = self.selection_range() {
-                let deleted_text = self.content.slice(start..end).to_string();
+                let deleted_text = self.safe_slice(start, end);
                 let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
                 self.execute_command_in_transaction(delete_command);
             }
@@ -208,7 +229,7 @@ impl TextDocument {
         // Handle selection deletion first with command
         if self.has_selection() {
             if let Some((start, end)) = self.selection_range() {
-                let deleted_text = self.content.slice(start..end).to_string();
+                let deleted_text = self.safe_slice(start, end);
                 let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
                 self.execute_command_in_transaction(delete_command);
             }
@@ -227,7 +248,7 @@ impl TextDocument {
     pub fn delete_char(&mut self) -> bool {
         if self.has_selection() {
             if let Some((start, end)) = self.selection_range() {
-                let deleted_text = self.content.slice(start..end).to_string();
+                let deleted_text = self.safe_slice(start, end);
                 let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
                 self.execute_command_in_transaction(delete_command);
                 return true;
@@ -237,7 +258,7 @@ impl TextDocument {
         let position = self.cursor.position();
         if position < self.content.len_chars() {
             // Get the character that will be deleted
-            let deleted_char = self.content.slice(position..position + 1).to_string();
+            let deleted_char = self.safe_slice(position, position + 1);
             let delete_command = Box::new(DeleteCommand::new(position, position + 1, deleted_char));
             self.execute_command_in_transaction(delete_command);
             true
@@ -249,7 +270,7 @@ impl TextDocument {
     pub fn backspace(&mut self) -> bool {
         if self.has_selection() {
             if let Some((start, end)) = self.selection_range() {
-                let deleted_text = self.content.slice(start..end).to_string();
+                let deleted_text = self.safe_slice(start, end);
                 let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
                 self.execute_command_in_transaction(delete_command);
                 return true;
@@ -259,7 +280,7 @@ impl TextDocument {
         let position = self.cursor.position();
         if position > 0 {
             // Get the character that will be deleted
-            let deleted_char = self.content.slice(position - 1..position).to_string();
+            let deleted_char = self.safe_slice(position - 1, position);
             let delete_command = Box::new(DeleteCommand::new(position - 1, position, deleted_char));
             self.execute_command_in_transaction(delete_command);
             
@@ -1086,9 +1107,21 @@ impl TextDocument {
     pub fn perform_undo(&mut self) -> bool {
         if let Some(new_content) = self.command_history.undo(&self.content) {
             self.content = new_content;
-            // Move cursor to the beginning of the affected area
-            // For now, keep the cursor at its current position
-            // TODO: In ENG-178, we'll improve cursor positioning after undo
+            
+            // Ensure cursor is within bounds after content change
+            let current_position = self.cursor.position();
+            let max_position = self.content.len_chars();
+            if current_position > max_position {
+                self.cursor.set_position(max_position);
+            }
+            
+            // Clear selection if it extends beyond the new content
+            if let Some((start, end)) = self.selection.range(current_position) {
+                if start > max_position || end > max_position {
+                    self.selection.clear();
+                }
+            }
+            
             true
         } else {
             false
@@ -1099,9 +1132,21 @@ impl TextDocument {
     pub fn perform_redo(&mut self) -> bool {
         if let Some(new_content) = self.command_history.redo(&self.content) {
             self.content = new_content;
-            // Move cursor to the end of the affected area
-            // For now, keep the cursor at its current position
-            // TODO: In ENG-178, we'll improve cursor positioning after redo
+            
+            // Ensure cursor is within bounds after content change
+            let current_position = self.cursor.position();
+            let max_position = self.content.len_chars();
+            if current_position > max_position {
+                self.cursor.set_position(max_position);
+            }
+            
+            // Clear selection if it extends beyond the new content
+            if let Some((start, end)) = self.selection.range(current_position) {
+                if start > max_position || end > max_position {
+                    self.selection.clear();
+                }
+            }
+            
             true
         } else {
             false
@@ -1198,12 +1243,29 @@ impl RopeTextDocument {
     }
 
     pub fn selection_range(&self) -> Option<(usize, usize)> {
-        self.selection.range(self.cursor.position())
+        // Ensure cursor position is within bounds before getting range
+        let cursor_pos = self.cursor.position().min(self.content.len_chars());
+        self.selection.range(cursor_pos).map(|(start, end)| {
+            // Ensure the range is within bounds of current content
+            let max_pos = self.content.len_chars();
+            let safe_start = start.min(max_pos);
+            let safe_end = end.min(max_pos);
+            (safe_start, safe_end)
+        })
     }
 
     pub fn selected_text(&self) -> Option<String> {
         self.selection_range().map(|(start, end)| {
-            self.content.slice(start..end).to_string()
+            // Safe slicing with bounds check
+            let max_pos = self.content.len_chars();
+            let safe_start = start.min(max_pos);
+            let safe_end = end.min(max_pos).max(safe_start);
+            
+            if safe_start == safe_end {
+                String::new()
+            } else {
+                self.content.slice(safe_start..safe_end).to_string()
+            }
         })
     }
 
