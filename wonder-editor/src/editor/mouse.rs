@@ -711,14 +711,18 @@ impl MarkdownEditor {
         // 2. Text content padding: typically 16px
         
         let status_bar_height = px(30.0);  // Matches the div().h(px(30.0)) in status bar
-        let text_padding = px(16.0);       // Standard text content padding
+        let text_padding = px(16.0);       // From .p_4() which adds 16px padding on all sides
         
         // For now, we still need to account for the external window chrome
-        // TODO: Get this dynamically from GPUI when possible
+        // TODO: Get this dynamically from GPUI when possible  
         let window_title_bar_estimate = px(28.0); // External window title bar
         
+        // FINE-TUNING: Adjust offsets based on user feedback - cursor is a few chars off
+        // The user clicked 'L' but cursor was slightly off, suggesting left padding needs adjustment
+        let left_padding_adjustment = px(-8.0); // Reduce left offset slightly to align better
+        
         let top_offset = window_title_bar_estimate + status_bar_height + text_padding;
-        let left_offset = text_padding;
+        let left_offset = text_padding + left_padding_adjustment;
         
         let bounds = TextContentBounds {
             top_offset,
