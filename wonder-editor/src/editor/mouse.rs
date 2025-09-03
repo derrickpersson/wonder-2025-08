@@ -868,7 +868,7 @@ impl MarkdownEditor {
         // 2. Text content padding: typically 16px
 
         let status_bar_height = px(30.0); // Matches the div().h(px(30.0)) in status bar
-        let text_padding = px(0.0); // From .p_4() which adds 16px padding on all sides
+        let text_padding = px(16.0); // From .p_4() which adds 16px padding on all sides
 
         // For now, we still need to account for the external window chrome
         // TODO: Get this dynamically from GPUI when possible
