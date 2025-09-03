@@ -106,60 +106,18 @@ impl EntityInputHandler for MarkdownEditor {
     fn character_index_for_point(
         &mut self,
         point: Point<Pixels>,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        // ENG-137: Basic click-to-position implementation
-        // Convert screen point to character index in the document
+        // ENG-137: Delegate to our sophisticated mouse positioning logic
+        // This ensures consistent behavior with our actual mouse event handlers
         
-        // Use the actual element bounds if available, otherwise fall back to estimates
-        let (padding, actual_point) = if let Some(bounds) = self.element_bounds {
-            // We have actual bounds, use them to calculate the relative position
-            // The text content starts at bounds.origin + padding
-            let padding = px(16.0); // This is the internal text padding
-            let actual_point = Point {
-                x: point.x - bounds.origin.x,
-                y: point.y - bounds.origin.y,
-            };
-            (padding, actual_point)
-        } else {
-            // Fall back to estimates if we don't have bounds yet
-            (px(16.0), point)
-        };
+        eprintln!("🎯 GPUI character_index_for_point called with: ({:.1}, {:.1})px", point.x.0, point.y.0);
         
-        let line_height = px(24.0);
-        
-        // Calculate which line was clicked based on y-coordinate
-        let relative_y = actual_point.y - padding;
-        let line_index = (relative_y / line_height).floor() as usize;
-        
-        let content = self.document.content();
-        let lines: Vec<&str> = content.lines().collect();
-        
-        // If clicked beyond last line, return end of document
-        if line_index >= lines.len() {
-            let end_pos = content.chars().count();
-            self.handle_click_at_position(end_pos);
-            return Some(end_pos);
-        }
-        
-        // Calculate character position within the clicked line
-        let line_content = lines[line_index];
-        let relative_x = actual_point.x - padding;
-        
-        // Simple character width approximation (will be improved in later tickets)
-        let font_size = px(16.0);
-        let approx_char_width = font_size * 0.6; // Rough approximation for now
-        let char_index_in_line = ((relative_x / approx_char_width).floor() as usize).min(line_content.chars().count());
-        
-        // Calculate absolute position in document
-        let chars_before_line: usize = lines.iter().take(line_index).map(|l| l.chars().count() + 1).sum(); // +1 for newline
-        let absolute_position = chars_before_line + char_index_in_line;
-        
-        // Update cursor position directly (this is called on the MarkdownEditor itself)
-        self.handle_click_at_position(absolute_position);
-        
-        Some(absolute_position)
+        // Use our accurate convert_point_to_character_index method
+        let character_position = self.convert_point_to_character_index(point, window);
+        self.handle_click_at_position(character_position);
+        Some(character_position)
     }
 }
 

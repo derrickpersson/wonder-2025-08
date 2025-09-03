@@ -222,6 +222,11 @@ impl Element for EditorElement {
         // Update the editor with the actual element bounds
         self.editor.update(cx, |editor, _cx| {
             editor.update_element_bounds(bounds);
+            
+            // Debug: Print the actual bounds we receive
+            eprintln!("🎯 ACTUAL ELEMENT BOUNDS RECEIVED:");
+            eprintln!("  Origin: ({:.1}, {:.1})px", bounds.origin.x.0, bounds.origin.y.0);
+            eprintln!("  Size: {:.1} x {:.1}px", bounds.size.width.0, bounds.size.height.0);
         });
 
         // ALWAYS register input handler so we can receive text input

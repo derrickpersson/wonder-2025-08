@@ -101,7 +101,7 @@ impl MarkdownEditor {
 
     // Enhanced method to convert screen coordinates to character positions using Point-based system
     // This provides much better accuracy than the previous fixed-approximation approach
-    fn convert_point_to_character_index(
+    pub(super) fn convert_point_to_character_index(
         &self,
         screen_point: Point<Pixels>,
         window: &mut Window,
@@ -980,10 +980,17 @@ impl MarkdownEditor {
             // The text content starts at bounds.origin + internal padding
             let text_padding = px(16.0); // Internal padding within the element
             
-            TextContentBounds {
+            let result = TextContentBounds {
                 top_offset: bounds.origin.y + text_padding,
                 left_offset: bounds.origin.x + text_padding,
-            }
+            };
+            
+            eprintln!("📐 ACTUAL BOUNDS CALCULATION:");
+            eprintln!("  Element origin: ({:.1}, {:.1})px", bounds.origin.x.0, bounds.origin.y.0);
+            eprintln!("  Text padding: {:.1}px", text_padding.0);
+            eprintln!("  Final offsets: top={:.1}px, left={:.1}px", result.top_offset.0, result.left_offset.0);
+            
+            result
         } else {
             // Fall back to estimates if we don't have actual bounds yet
             // These values should match the GPUI layout structure defined in gpui_traits.rs
