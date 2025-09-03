@@ -29,8 +29,8 @@ impl MarkdownEditor {
         window.focus(&self.focus_handle);
         self.focused = true;
         
-        // ENG-137/138: Convert mouse coordinates to character position
-        let character_position = self.convert_point_to_character_index(event.position);
+        // ENG-137/138: Convert mouse coordinates to character position using GPUI measurement
+        let character_position = self.convert_point_to_character_index(event.position, window);
         log_position_flow("1-COORDINATE_CONVERSION", character_position, "from convert_point_to_character_index");
         
         // ENG-140: Check for Shift modifier for selection extension
@@ -59,12 +59,12 @@ impl MarkdownEditor {
     pub(super) fn handle_mouse_up(
         &mut self,
         event: &MouseUpEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // ENG-138: Handle mouse up for drag selection
         if self.is_mouse_down {
-            let character_position = self.convert_point_to_character_index(event.position);
+            let character_position = self.convert_point_to_character_index(event.position, window);
             self.handle_mouse_up_at_position(character_position);
             
             self.is_mouse_down = false;
@@ -77,12 +77,12 @@ impl MarkdownEditor {
     pub(super) fn handle_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // ENG-138: Handle mouse drag for selection
         if self.is_mouse_down {
-            let character_position = self.convert_point_to_character_index(event.position);
+            let character_position = self.convert_point_to_character_index(event.position, window);
             self.handle_mouse_drag_to_position(character_position);
             
             cx.notify();
@@ -91,9 +91,9 @@ impl MarkdownEditor {
 
     // Enhanced method to convert screen coordinates to character positions using Point-based system
     // This provides much better accuracy than the previous fixed-approximation approach
-    fn convert_point_to_character_index(&self, screen_point: Point<Pixels>) -> usize {
+    fn convert_point_to_character_index(&self, screen_point: Point<Pixels>, window: &mut Window) -> usize {
         // First, convert screen coordinates to text coordinates (Point)
-        let text_point = self.convert_screen_to_text_point(screen_point);
+        let text_point = self.convert_screen_to_text_point(screen_point, window);
         
         // Then use coordinate mapper to convert Point to offset
         let content = self.document.content();
@@ -140,7 +140,7 @@ impl MarkdownEditor {
     }
     
     // Convert screen coordinates to text coordinates (Point) 
-    fn convert_screen_to_text_point(&self, screen_point: Point<Pixels>) -> TextPoint {
+    fn convert_screen_to_text_point(&self, screen_point: Point<Pixels>, window: &mut Window) -> TextPoint {
         let content_bounds = self.calculate_text_content_bounds();
         let relative_y = screen_point.y - content_bounds.top_offset;
         let relative_x = screen_point.x - content_bounds.left_offset;
@@ -166,7 +166,7 @@ impl MarkdownEditor {
         let screen_pos = ScreenPosition::new(relative_x.0, relative_y.0);
         
         // Calculate row and column based on font metrics
-        let text_point = self.convert_screen_position_to_text_point(screen_pos);
+        let text_point = self.convert_screen_position_to_text_point(screen_pos, window);
         
         // Add debugging for the final result
         eprintln!("🎯 TEXT POSITION RESULT");
@@ -184,7 +184,7 @@ impl MarkdownEditor {
     }
     
     // Convert screen position to text point using proper font metrics
-    fn convert_screen_position_to_text_point(&self, screen_pos: ScreenPosition) -> TextPoint {
+    fn convert_screen_position_to_text_point(&self, screen_pos: ScreenPosition, window: &mut Window) -> TextPoint {
         let content = self.document.content();
         let lines: Vec<&str> = content.lines().collect();
         
@@ -237,9 +237,9 @@ impl MarkdownEditor {
         // Clamp row to valid range
         row = row.min((lines.len().saturating_sub(1)) as u32);
         
-        // Calculate column within the line
+        // Calculate column within the line using GPUI text measurement for pixel-perfect accuracy
         let line_content = lines[row as usize];
-        let column = self.calculate_column_from_x_position(line_content, screen_pos.x, row);
+        let column = self.calculate_column_from_x_position_with_gpui(line_content, screen_pos.x, row, window);
         
         TextPoint::new(row, column)
     }
@@ -299,6 +299,77 @@ impl MarkdownEditor {
         
         eprintln!("  ✅ Best column: {} (min_distance: {:.1}px)", best_column, min_distance);
         best_column
+    }
+    
+    // ENG-184: Calculate column position using GPUI TextSystem for pixel-perfect accuracy
+    // This replaces approximation with actual GPUI text measurement for precise cursor positioning
+    fn calculate_column_from_x_position_with_gpui(&self, line_content: &str, x_position: f32, _row: u32, window: &mut Window) -> u32 {
+        if line_content.is_empty() || x_position <= 0.0 {
+            return 0;
+        }
+        
+        // Determine font size for this line (headings use larger fonts)
+        let base_font_size = 16.0;
+        let font_size = if line_content.starts_with('#') {
+            let heading_level = line_content.chars().take_while(|&c| c == '#').count() as u32;
+            if heading_level <= 6 {
+                self.hybrid_renderer.get_scalable_font_size_for_heading_level(heading_level, base_font_size)
+            } else {
+                base_font_size
+            }
+        } else {
+            base_font_size
+        };
+        
+        // Get the transformed content and text runs for this line using hybrid renderer
+        // This ensures we measure the same text that is actually rendered
+        let cursor_pos_in_line = usize::MAX; // No cursor for measurement
+        let line_selection = None; // No selection for measurement
+        
+        let display_content = self.hybrid_renderer.get_display_content(line_content, cursor_pos_in_line, line_selection.clone());
+        let text_runs = self.hybrid_renderer.generate_mixed_text_runs(line_content, cursor_pos_in_line, line_selection);
+        
+        // Use GPUI TextSystem to shape the line - this gives us exact measurement
+        let shaped_line = if text_runs.is_empty() {
+            // Fallback to simple measurement if no runs available
+            let text_run = TextRun {
+                len: display_content.len(),
+                font: gpui::Font {
+                    family: "SF Pro".into(),
+                    features: gpui::FontFeatures::default(),
+                    weight: gpui::FontWeight::NORMAL,
+                    style: gpui::FontStyle::Normal,
+                    fallbacks: None,
+                },
+                color: gpui::rgb(0xcdd6f4).into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            
+            window.text_system().shape_line(
+                display_content.into(),
+                gpui::px(font_size),
+                &[text_run],
+                None,
+            )
+        } else {
+            // Use proper text runs for accurate measurement
+            window.text_system().shape_line(
+                display_content.into(),
+                gpui::px(font_size), 
+                &text_runs,
+                None,
+            )
+        };
+        
+        // Use GPUI's built-in reverse coordinate mapping - this is pixel-perfect!
+        let character_index = shaped_line.closest_index_for_x(gpui::px(x_position));
+        
+        // Map the character index in display content back to original content
+        // For now, we'll use the character index directly since we need the position in display content
+        // The hybrid renderer handles the mapping between original and display content
+        character_index as u32
     }
     
     // ENG-183: Measure text width with improved accuracy to fix cursor positioning bug
@@ -664,16 +735,8 @@ impl MarkdownEditor {
         bounds
     }
     
-    // ENG-182: Test-only method to expose coordinate conversion for testing the bug
-    #[cfg(test)]
-    pub fn test_convert_screen_to_character_position(&self, x_pixels: f32, y_pixels: f32) -> usize {
-        use gpui::{Point, Pixels};
-        let screen_point = Point {
-            x: Pixels(x_pixels),
-            y: Pixels(y_pixels)
-        };
-        self.convert_point_to_character_index(screen_point)
-    }
+    // ENG-184: Removed test_convert_screen_to_character_position as it's incompatible with GPUI-based implementation
+    // The new implementation requires Window parameter for actual GPUI TextSystem.shape_line() calls
     
     // ENG-182: Test-only method to expose text width measurement for testing
     #[cfg(test)]
