@@ -718,8 +718,8 @@ impl MarkdownEditor {
         let window_title_bar_estimate = px(28.0); // External window title bar
         
         // FINE-TUNING: Adjust offsets based on user feedback - cursor is a few chars off
-        // The user clicked 'L' but cursor was slightly off, suggesting left padding needs adjustment
-        let left_padding_adjustment = px(-8.0); // Reduce left offset slightly to align better
+        // The user reports it's "even more off" and should move the other way
+        let left_padding_adjustment = px(8.0); // Increase left offset to align better
         
         let top_offset = window_title_bar_estimate + status_bar_height + text_padding;
         let left_offset = text_padding + left_padding_adjustment;
