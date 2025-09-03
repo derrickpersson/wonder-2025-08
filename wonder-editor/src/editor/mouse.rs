@@ -975,45 +975,38 @@ impl MarkdownEditor {
     /// Calculate the bounds of the text content area dynamically
     /// This accounts for the status bar, padding, and any other UI elements
     fn calculate_text_content_bounds(&self) -> TextContentBounds {
-        // These values should match the GPUI layout structure defined in gpui_traits.rs
+        // Use actual element bounds if available
+        if let Some(bounds) = self.element_bounds {
+            // The text content starts at bounds.origin + internal padding
+            let text_padding = px(16.0); // Internal padding within the element
+            
+            TextContentBounds {
+                top_offset: bounds.origin.y + text_padding,
+                left_offset: bounds.origin.x + text_padding,
+            }
+        } else {
+            // Fall back to estimates if we don't have actual bounds yet
+            // These values should match the GPUI layout structure defined in gpui_traits.rs
 
-        // From the layout structure, we have:
-        // 1. Status bar: height 30px (line 195 in gpui_traits.rs)
-        // 2. Text content padding: typically 16px
+            // From the layout structure, we have:
+            // 1. Status bar: height 30px (line 195 in gpui_traits.rs)
+            // 2. Text content padding: typically 16px
 
-        let status_bar_height = px(30.0); // Matches the div().h(px(30.0)) in status bar
-        let text_padding = px(16.0); // From .p_4() which adds 16px padding on all sides
+            let status_bar_height = px(30.0); // Matches the div().h(px(30.0)) in status bar
+            let text_padding = px(16.0); // From .p_4() which adds 16px padding on all sides
 
-        // For now, we still need to account for the external window chrome
-        // TODO: Get this dynamically from GPUI when possible
-        let window_title_bar_estimate = px(28.0); // External window title bar
+            // For now, we still need to account for the external window chrome
+            // TODO: Get this dynamically from GPUI when possible
+            let window_title_bar_estimate = px(28.0); // External window title bar
 
-        // FINE-TUNING: Adjust offsets based on user feedback - cursor is a few chars off
-        // The user reports it's "even more off" and should move the other way
-        let left_padding_adjustment = px(16.0); // Increase left offset to align better
+            let top_offset = window_title_bar_estimate + status_bar_height + text_padding;
+            let left_offset = text_padding;
 
-        let top_offset = window_title_bar_estimate + status_bar_height + text_padding;
-        let left_offset = text_padding + left_padding_adjustment;
-
-        let bounds = TextContentBounds {
-            top_offset,
-            left_offset,
-        };
-
-        eprintln!("📐 CALCULATED TEXT CONTENT BOUNDS");
-        eprintln!("  Status bar height: {:.1}px", status_bar_height.0);
-        eprintln!("  Text padding: {:.1}px", text_padding.0);
-        eprintln!(
-            "  Window title estimate: {:.1}px",
-            window_title_bar_estimate.0
-        );
-        eprintln!(
-            "  Final bounds: top={:.1}px, left={:.1}px",
-            bounds.top_offset.0, bounds.left_offset.0
-        );
-        eprintln!("  ⚠️  WARNING: These are ESTIMATED values, not real GPUI bounds!");
-
-        bounds
+            TextContentBounds {
+                top_offset,
+                left_offset,
+            }
+        }
     }
 
     // ENG-184: Removed test_convert_screen_to_character_position as it's incompatible with GPUI-based implementation

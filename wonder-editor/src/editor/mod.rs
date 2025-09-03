@@ -35,6 +35,8 @@ pub struct MarkdownEditor {
     last_click_position: Option<usize>,
     // ENG-142: Scroll state tracking
     scroll_offset: f32,
+    // Actual element bounds from GPUI (updated during paint)
+    element_bounds: Option<Bounds<Pixels>>,
 }
 
 impl MarkdownEditor {
@@ -56,6 +58,7 @@ impl MarkdownEditor {
             last_click_position: None,
             // ENG-142: Initialize scroll state
             scroll_offset: 0.0,
+            element_bounds: None,
         }
     }
 
@@ -77,6 +80,7 @@ impl MarkdownEditor {
             last_click_position: None,
             // ENG-142: Initialize scroll state
             scroll_offset: 0.0,
+            element_bounds: None,
         }
     }
 
@@ -136,6 +140,11 @@ impl MarkdownEditor {
 
     // Legacy action conversion removed - now using InputRouter directly
 
+
+    // Update the element bounds when we receive them from GPUI
+    pub fn update_element_bounds(&mut self, bounds: Bounds<Pixels>) {
+        self.element_bounds = Some(bounds);
+    }
 
     // Provide access to document for more complex operations
     pub fn document(&self) -> &TextDocument {

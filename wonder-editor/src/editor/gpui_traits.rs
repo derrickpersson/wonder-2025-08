@@ -111,11 +111,26 @@ impl EntityInputHandler for MarkdownEditor {
     ) -> Option<usize> {
         // ENG-137: Basic click-to-position implementation
         // Convert screen point to character index in the document
-        let padding = px(16.0);
+        
+        // Use the actual element bounds if available, otherwise fall back to estimates
+        let (padding, actual_point) = if let Some(bounds) = self.element_bounds {
+            // We have actual bounds, use them to calculate the relative position
+            // The text content starts at bounds.origin + padding
+            let padding = px(16.0); // This is the internal text padding
+            let actual_point = Point {
+                x: point.x - bounds.origin.x,
+                y: point.y - bounds.origin.y,
+            };
+            (padding, actual_point)
+        } else {
+            // Fall back to estimates if we don't have bounds yet
+            (px(16.0), point)
+        };
+        
         let line_height = px(24.0);
         
         // Calculate which line was clicked based on y-coordinate
-        let relative_y = point.y - padding;
+        let relative_y = actual_point.y - padding;
         let line_index = (relative_y / line_height).floor() as usize;
         
         let content = self.document.content();
@@ -130,7 +145,7 @@ impl EntityInputHandler for MarkdownEditor {
         
         // Calculate character position within the clicked line
         let line_content = lines[line_index];
-        let relative_x = point.x - padding;
+        let relative_x = actual_point.x - padding;
         
         // Simple character width approximation (will be improved in later tickets)
         let font_size = px(16.0);

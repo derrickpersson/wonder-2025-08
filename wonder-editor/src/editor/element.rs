@@ -219,6 +219,11 @@ impl Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) {
+        // Update the editor with the actual element bounds
+        self.editor.update(cx, |editor, _cx| {
+            editor.update_element_bounds(bounds);
+        });
+
         // ALWAYS register input handler so we can receive text input
         window.handle_input(
             &self.focus_handle,
