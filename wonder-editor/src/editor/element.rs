@@ -271,6 +271,7 @@ impl Element for EditorElement {
     }
 }
 
+
 impl gpui::IntoElement for EditorElement {
     type Element = Self;
 
