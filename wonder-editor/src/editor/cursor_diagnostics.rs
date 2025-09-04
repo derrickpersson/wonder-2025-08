@@ -4,7 +4,7 @@
 //! cursor positioning issues during movement and selection operations.
 
 use crate::core::{Point as TextPoint, CoordinateConversion, RopeCoordinateMapper};
-use gpui::{px, Pixels, Point};
+use gpui::{Pixels, Point};
 use ropey::Rope;
 use std::sync::atomic::{AtomicBool, Ordering};
 

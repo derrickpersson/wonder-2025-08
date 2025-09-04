@@ -8,15 +8,12 @@ pub mod token_mode;
 pub mod coordinate_mapping;
 pub mod text_runs;
 pub mod layout;
-// Re-export important types for convenience
-pub use CoordinateMap as CoordinateMapping;
-
 // Re-export main types for convenience
 pub use text_content::TextContent;
 pub use style_context::StyleContext;
 pub use typography::HeadingTypographyStyle;
 pub use token_mode::TokenRenderMode;
-pub use coordinate_mapping::{CoordinateMap, TokenBoundary, LineOffset, CoordinateMapper};
+pub use coordinate_mapping::{CoordinateMap, CoordinateMapper};
 pub use text_runs::{StyledTextSegment, TextRunGenerator};
 pub use layout::{HybridLayoutElement, LayoutManager};
 pub use typography::Typography;

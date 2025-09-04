@@ -6,20 +6,11 @@ mod mouse;
 mod rendering;
 
 use crate::core::TextDocument;
-use element::EditorElement;
-
 #[cfg(test)]
 mod tests;
 use crate::hybrid_renderer::HybridTextRenderer;
 use crate::input::InputRouter;
-use gpui::{
-    div, prelude::*, px, rgb, size, transparent_black, App, Bounds, ClipboardItem, Context,
-    Element, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Hsla,
-    IntoElement, KeyDownEvent, LayoutId, Pixels, Point, Render, ShapedLine, TextRun,
-    UTF16Selection, Window,
-};
-
-// Legacy GPUI actions removed - now using InputRouter action system
+use gpui::{prelude::*, Bounds, Context, FocusHandle, Pixels};
 
 pub struct MarkdownEditor {
     document: TextDocument,
@@ -128,7 +119,6 @@ impl MarkdownEditor {
     }
 
 
-    // Legacy compatibility methods for tests
     pub fn get_content(&self) -> String {
         self.content()
     }
@@ -136,13 +126,6 @@ impl MarkdownEditor {
     pub fn insert_char(&mut self, ch: char) {
         self.handle_char_input(ch);
     }
-
-
-    // GPUI action handlers - these have the signature expected by cx.listener()
-    // Legacy action handlers removed - now using InputRouter system
-
-
-    // Legacy action conversion removed - now using InputRouter directly
 
 
     // Update the element bounds when we receive them from GPUI

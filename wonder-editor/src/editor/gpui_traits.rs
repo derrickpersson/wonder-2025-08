@@ -1,5 +1,5 @@
 use gpui::{
-    div, px, rgb, Bounds, Context, EntityInputHandler, FocusHandle, Focusable, InteractiveElement,
+    div, Bounds, Context, EntityInputHandler, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Pixels, Point, Render, Styled, UTF16Selection, Window,
 };
 

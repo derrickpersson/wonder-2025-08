@@ -16,7 +16,6 @@ pub struct HeadingTypographyStyle {
 pub struct Typography;
 
 impl Typography {
-    // Legacy fixed font size methods (kept for compatibility)
     pub fn get_font_size_for_heading_level(level: u32) -> f32 {
         match level {
             1 => 24.0,

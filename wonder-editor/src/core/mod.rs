@@ -7,8 +7,6 @@ pub mod selection;
 pub mod text_document;
 pub mod test_undo_integration;
 
-pub use command_history::{CommandHistory, CommandTransaction, HistoryStats};
-pub use commands::{UndoableCommand, InsertCommand, DeleteCommand, ReplaceCommand};
-pub use coordinate_mapping::{CoordinateConversion, RopeCoordinateMapper, ScreenPosition, PointRangeExt, OffsetRangeExt};
+pub use coordinate_mapping::{CoordinateConversion, RopeCoordinateMapper, ScreenPosition};
 pub use point::Point;
 pub use text_document::TextDocument;

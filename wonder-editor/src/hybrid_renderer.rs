@@ -5,7 +5,7 @@ use crate::rendering::{
     StyledTextSegment, HybridLayoutElement, HeadingTypographyStyle,
     CoordinateMapper, TextRunGenerator, LayoutManager,
 };
-use gpui::{TextRun, rgb, Font, FontFeatures, FontWeight, FontStyle, Hsla};
+use gpui::TextRun;
 
 #[derive(Clone)]
 pub struct HybridTextRenderer {
@@ -184,7 +184,6 @@ impl HybridTextRenderer {
         )
     }
     
-    // Legacy methods for backwards compatibility (kept for fallback/testing)
     pub fn get_token_render_mode(&self, token: &ParsedToken, cursor_position: usize, selection: Option<Range<usize>>) -> TokenRenderMode {
         TokenRenderMode::get_for_token(token, cursor_position, selection)
     }

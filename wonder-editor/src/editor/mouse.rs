@@ -1,6 +1,6 @@
 use crate::core::{CoordinateConversion, Point as TextPoint, RopeCoordinateMapper, ScreenPosition};
 use gpui::{
-    font, px, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString,
+    px, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     TextRun, Window,
 };
 use ropey::Rope;
@@ -382,7 +382,7 @@ impl MarkdownEditor {
     fn calculate_line_height_for_content(
         &self,
         line_content: &str,
-        _line_start_pos: usize,
+        line_start_pos: usize,
     ) -> Pixels {
         px(self.calculate_line_height_for_content_pixels(line_content))
     }

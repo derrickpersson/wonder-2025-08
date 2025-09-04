@@ -1,10 +1,8 @@
 //! Test the undo/redo integration with real text operations
 
-use super::text_document::TextDocument;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::core::TextDocument;
 
     #[test]
     fn test_typing_creates_undoable_commands() {

@@ -37,7 +37,10 @@ impl MarkdownEditor {
                         cursor_point,
                         selection,
                         &content,
-                        500.0 // TODO: Get actual viewport height
+                        {
+                            // TODO: Get actual viewport height - using placeholder for now
+                            500.0 
+                        }
                     );
                     
                     eprintln!("{}", report);

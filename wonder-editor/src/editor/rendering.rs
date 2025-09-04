@@ -1,7 +1,6 @@
 use gpui::{
     px, rgb, size, transparent_black, App, Bounds, Pixels, ShapedLine, TextRun, Window,
 };
-use crate::hybrid_renderer::HybridTextRenderer;
 
 use super::element::EditorElement;
 

@@ -483,7 +483,7 @@ impl TextRunGenerator {
         &self, 
         text_runs: Vec<TextRun>, 
         _original_content: &str, 
-        _selection: Range<usize>, 
+        selection: Range<usize>, 
         _token_modes: &[(ParsedToken, TokenRenderMode)]
     ) -> Vec<TextRun> {
         // For now, we'll simplify selection highlighting since we transformed the content

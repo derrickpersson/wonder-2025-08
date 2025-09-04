@@ -1,5 +1,5 @@
 use gpui::{
-    div, px, rgb, size, transparent_black, App, Bounds, Element, ElementInputHandler, Entity,
+    px, rgb, size, App, Bounds, Element, ElementInputHandler, Entity,
     FocusHandle, LayoutId, Pixels, ShapedLine, TextRun, Window,
 };
 use crate::hybrid_renderer::HybridTextRenderer;
