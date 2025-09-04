@@ -1,6 +1,6 @@
 use gpui::{
-    div, px, rgb, Bounds, Context, EntityInputHandler, Focusable, FocusHandle, IntoElement, 
-    InteractiveElement, ParentElement, Pixels, Point, Render, Styled, UTF16Selection, Window,
+    div, px, rgb, Bounds, Context, EntityInputHandler, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Pixels, Point, Render, Styled, UTF16Selection, Window,
 };
 
 use super::{element::EditorElement, MarkdownEditor};
@@ -111,9 +111,12 @@ impl EntityInputHandler for MarkdownEditor {
     ) -> Option<usize> {
         // ENG-137: Delegate to our sophisticated mouse positioning logic
         // This ensures consistent behavior with our actual mouse event handlers
-        
-        eprintln!("🎯 GPUI character_index_for_point called with: ({:.1}, {:.1})px", point.x.0, point.y.0);
-        
+
+        eprintln!(
+            "🎯 GPUI character_index_for_point called with: ({:.1}, {:.1})px",
+            point.x.0, point.y.0
+        );
+
         // Use our accurate convert_point_to_character_index method
         let character_position = self.convert_point_to_character_index(point, window);
         self.handle_click_at_position(character_position);
@@ -148,38 +151,16 @@ impl Render for MarkdownEditor {
         // Use a simple div with action handlers that wraps our hybrid editor
         div()
             .track_focus(&self.focus_handle)
-            // ENG-137/138: Mouse event handlers for click-to-position and drag selection
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(Self::handle_mouse_down),
             )
-            .on_mouse_up(
-                gpui::MouseButton::Left,
-                cx.listener(Self::handle_mouse_up),
-            )
+            .on_mouse_up(gpui::MouseButton::Left, cx.listener(Self::handle_mouse_up))
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
             .on_key_down(cx.listener(Self::handle_key_down))
             .size_full()
             .flex()
             .flex_col()
-            .child(
-                // Status bar
-                div()
-                    .h(px(30.0))
-                    .w_full()
-                    .bg(rgb(0x1e1e2e))
-                    .border_b_1()
-                    .border_color(rgb(0x313244))
-                    .flex()
-                    .items_center()
-                    .px_4()
-                    .child(
-                        div()
-                            .text_color(rgb(0xa6adc8))
-                            .text_size(px(14.0))
-                            .child("Hybrid Preview - Edit anywhere!"),
-                    ),
-            )
             .child(
                 // Main content area with hybrid editor
                 div().flex_1().w_full().p_4().child(

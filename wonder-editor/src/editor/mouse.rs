@@ -247,16 +247,57 @@ impl MarkdownEditor {
             return TextPoint::zero();
         }
 
-        // Find the correct row by accounting for variable line heights
-        let mut current_y_offset = 0.0;
+        // Use actual line positions if available, otherwise fall back to calculations
         let mut row = 0u32;
 
-        // Log the initial screen position for debugging
         eprintln!("🎯 SCREEN POSITION ANALYSIS");
         eprintln!("  Screen Y: {:.1}px", screen_pos.y);
-        eprintln!("  Starting search from Y offset: {:.1}px", current_y_offset);
 
-        for (idx, line_content) in lines.iter().enumerate() {
+        if !self.actual_line_positions.is_empty() && self.actual_line_positions.len() == lines.len() {
+            // Use actual line positions from GPUI rendering
+            eprintln!("  Using actual GPUI line positions ({} lines)", self.actual_line_positions.len());
+            
+            for (idx, &line_y_pos) in self.actual_line_positions.iter().enumerate() {
+                let line_content = lines[idx];
+                
+                // For actual positions, we need to determine line height to create bounds
+                let next_line_y = if idx + 1 < self.actual_line_positions.len() {
+                    self.actual_line_positions[idx + 1]
+                } else {
+                    // Last line - estimate height based on content
+                    let font_size = if line_content.starts_with('#') {
+                        let heading_level = line_content.chars().take_while(|&c| c == '#').count() as u32;
+                        match heading_level {
+                            1 => 40.0,
+                            2 => 32.0, 
+                            3 => 28.0,
+                            4 => 24.0,
+                            5 => 20.0,
+                            _ => 18.0,
+                        }
+                    } else {
+                        16.0
+                    };
+                    line_y_pos + font_size * 1.5 // Approximate line height
+                };
+
+                eprintln!(
+                    "  Line {}: Y position {:.1}px to {:.1}px (actual GPUI)",
+                    idx, line_y_pos, next_line_y
+                );
+
+                if screen_pos.y >= line_y_pos && screen_pos.y < next_line_y {
+                    eprintln!("  ✅ MATCH: Click at {:.1}px falls in line {} (actual positions)", screen_pos.y, idx);
+                    row = idx as u32;
+                    break;
+                }
+            }
+        } else {
+            // Fall back to calculated positions
+            eprintln!("  Using calculated line positions (fallback)");
+            let mut current_y_offset = 0.0;
+
+            for (idx, line_content) in lines.iter().enumerate() {
             // Calculate line height based on content (headings have larger line heights)
             let line_height = self.calculate_line_height_for_content_pixels(line_content);
 
@@ -294,6 +335,7 @@ impl MarkdownEditor {
             if idx == lines.len() - 1 {
                 eprintln!("  📍 END OF DOCUMENT: Using last line {}", idx);
                 row = idx as u32;
+            }
             }
         }
 
@@ -366,7 +408,8 @@ impl MarkdownEditor {
         for col in 0..=line_chars.len() {
             // Measure actual text width up to this column using GPUI
             let text_up_to_col = line_chars[..col].iter().collect::<String>();
-            let measured_width = self.measure_text_width_with_gpui(&text_up_to_col, line_content, window);
+            let measured_width =
+                self.measure_text_width_with_gpui(&text_up_to_col, line_content, window);
 
             let distance = (measured_width - x_position).abs();
 
@@ -524,7 +567,12 @@ impl MarkdownEditor {
     }
 
     // Measure actual text width using GPUI TextSystem - no approximations!
-    fn measure_text_width_with_gpui(&self, text: &str, line_content: &str, window: &mut Window) -> f32 {
+    fn measure_text_width_with_gpui(
+        &self,
+        text: &str,
+        line_content: &str,
+        window: &mut Window,
+    ) -> f32 {
         if text.is_empty() {
             return 0.0;
         }
@@ -633,7 +681,7 @@ impl MarkdownEditor {
                         base_char_width * 2.0
                     } else if code_point >= 0x2600 && code_point <= 0x26FF {
                         // Miscellaneous Symbols (including more emojis) - also wide
-                        base_char_width * 2.0  
+                        base_char_width * 2.0
                     } else if code_point >= 0x3000 && code_point <= 0x9FFF {
                         // CJK characters (Chinese, Japanese, Korean) - typically wider
                         base_char_width * 1.8
@@ -644,7 +692,7 @@ impl MarkdownEditor {
                         // Regular ASCII fallback
                         base_char_width
                     }
-                },
+                }
             };
             total_width += char_width;
         }
@@ -979,34 +1027,32 @@ impl MarkdownEditor {
         if let Some(bounds) = self.element_bounds {
             // The text content starts at bounds.origin + internal padding
             let text_padding = px(16.0); // Internal padding within the element
-            
+
             let result = TextContentBounds {
                 top_offset: bounds.origin.y + text_padding,
                 left_offset: bounds.origin.x + text_padding,
             };
-            
+
             eprintln!("📐 ACTUAL BOUNDS CALCULATION:");
-            eprintln!("  Element origin: ({:.1}, {:.1})px", bounds.origin.x.0, bounds.origin.y.0);
+            eprintln!(
+                "  Element origin: ({:.1}, {:.1})px",
+                bounds.origin.x.0, bounds.origin.y.0
+            );
             eprintln!("  Text padding: {:.1}px", text_padding.0);
-            eprintln!("  Final offsets: top={:.1}px, left={:.1}px", result.top_offset.0, result.left_offset.0);
-            
+            eprintln!(
+                "  Final offsets: top={:.1}px, left={:.1}px",
+                result.top_offset.0, result.left_offset.0
+            );
+
             result
         } else {
             // Fall back to estimates if we don't have actual bounds yet
             // These values should match the GPUI layout structure defined in gpui_traits.rs
 
             // From the layout structure, we have:
-            // 1. Status bar: height 30px (line 195 in gpui_traits.rs)
-            // 2. Text content padding: typically 16px
-
-            let status_bar_height = px(30.0); // Matches the div().h(px(30.0)) in status bar
+            // 1. Text content padding: typically 16px
             let text_padding = px(16.0); // From .p_4() which adds 16px padding on all sides
-
-            // For now, we still need to account for the external window chrome
-            // TODO: Get this dynamically from GPUI when possible
-            let window_title_bar_estimate = px(28.0); // External window title bar
-
-            let top_offset = window_title_bar_estimate + status_bar_height + text_padding;
+            let top_offset = text_padding;
             let left_offset = text_padding;
 
             TextContentBounds {

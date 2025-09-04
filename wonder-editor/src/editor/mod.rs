@@ -37,6 +37,8 @@ pub struct MarkdownEditor {
     scroll_offset: f32,
     // Actual element bounds from GPUI (updated during paint)
     element_bounds: Option<Bounds<Pixels>>,
+    // Actual line positions from GPUI rendering (Y coordinates of each line)
+    actual_line_positions: Vec<f32>,
 }
 
 impl MarkdownEditor {
@@ -59,6 +61,7 @@ impl MarkdownEditor {
             // ENG-142: Initialize scroll state
             scroll_offset: 0.0,
             element_bounds: None,
+            actual_line_positions: Vec::new(),
         }
     }
 
@@ -81,6 +84,7 @@ impl MarkdownEditor {
             // ENG-142: Initialize scroll state
             scroll_offset: 0.0,
             element_bounds: None,
+            actual_line_positions: Vec::new(),
         }
     }
 
@@ -144,6 +148,11 @@ impl MarkdownEditor {
     // Update the element bounds when we receive them from GPUI
     pub fn update_element_bounds(&mut self, bounds: Bounds<Pixels>) {
         self.element_bounds = Some(bounds);
+    }
+
+    // Update the actual line positions from GPUI rendering
+    pub fn update_line_positions(&mut self, line_positions: Vec<f32>) {
+        self.actual_line_positions = line_positions;
     }
 
     // Provide access to document for more complex operations

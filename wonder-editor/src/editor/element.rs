@@ -253,17 +253,22 @@ impl Element for EditorElement {
             corner_radii: gpui::Corners::all(px(4.0)),
         });
 
-        // Paint all text lines
+        // Paint all text lines and capture actual line positions
         let padding = px(16.0);
-        let line_height = px(24.0);
         let mut text_origin = bounds.origin + gpui::point(padding, padding);
+        let mut actual_line_positions = Vec::new();
 
         // Paint selection first (behind text)
         if let Some(ref selection_range) = self.selection {
             self.paint_selection(bounds, shaped_lines, selection_range.clone(), window);
         }
 
+        let line_height = px(24.0);
         for shaped_line in shaped_lines.iter_mut() {
+            // Capture the actual Y position for this line (relative to content area)
+            let relative_y = text_origin.y - bounds.origin.y - padding;
+            actual_line_positions.push(relative_y.0);
+            
             shaped_line
                 .paint(text_origin, line_height, window, cx)
                 .unwrap_or_else(|err| {
@@ -273,6 +278,11 @@ impl Element for EditorElement {
             // Move to next line
             text_origin.y += line_height;
         }
+
+        // Update the editor with actual line positions
+        self.editor.update(cx, |editor, _cx| {
+            editor.update_line_positions(actual_line_positions);
+        });
 
         // Paint cursor if focused
         if self.focused {
