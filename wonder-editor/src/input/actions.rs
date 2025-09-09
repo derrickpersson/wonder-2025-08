@@ -34,6 +34,14 @@ pub enum EditorAction {
     PageUp,
     PageDown,
     
+    // Scroll operations (ENG-191: Add keyboard scroll navigation)
+    ScrollUp,
+    ScrollDown,
+    ScrollPageUp,
+    ScrollPageDown,
+    ScrollToTop,
+    ScrollToBottom,
+    
     // Clipboard operations
     Copy,
     Cut,
@@ -130,5 +138,27 @@ mod tests {
         // Test current line deletion
         let delete_line = EditorAction::DeleteCurrentLine;
         assert_ne!(delete_line, delete_prev_word);
+    }
+
+    #[test]
+    fn test_scroll_actions() {
+        // ENG-191: Test scroll action variants
+        let scroll_up = EditorAction::ScrollUp;
+        let scroll_down = EditorAction::ScrollDown;
+        assert_ne!(scroll_up, scroll_down);
+        
+        // Test page scroll actions
+        let scroll_page_up = EditorAction::ScrollPageUp;
+        let scroll_page_down = EditorAction::ScrollPageDown;
+        assert_ne!(scroll_page_up, scroll_page_down);
+        
+        // Test document scroll actions
+        let scroll_to_top = EditorAction::ScrollToTop;
+        let scroll_to_bottom = EditorAction::ScrollToBottom;
+        assert_ne!(scroll_to_top, scroll_to_bottom);
+        
+        // Test action uniqueness
+        assert_ne!(scroll_up, scroll_page_up);
+        assert_ne!(scroll_down, scroll_to_bottom);
     }
 }

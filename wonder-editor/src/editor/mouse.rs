@@ -1,6 +1,6 @@
 use crate::core::{CoordinateConversion, Point as TextPoint, RopeCoordinateMapper, ScreenPosition};
 use gpui::{
-    px, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    px, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollWheelEvent, Pixels, Point,
     TextRun, Window,
 };
 use ropey::Rope;
@@ -31,12 +31,31 @@ impl MarkdownEditor {
         window.focus(&self.focus_handle);
         self.focused = true;
 
-        // ENG-137/138: Convert mouse coordinates to character position using GPUI measurement
-        let character_position = self.convert_point_to_character_index(event.position, window);
+        // ENG-137/138: Use CursorMovementService for screen-to-text conversion when possible
+        let character_position = if self.element_bounds.is_some() {
+            // Use the new unified screen coordinate system
+            if self.cursor_movement.move_to_screen_position(
+                &mut self.document,
+                event.position.x.0,
+                event.position.y.0,
+                self.element_bounds.unwrap(),
+                &self.visual_line_manager,
+                window,
+            ) {
+                self.document.cursor_position()
+            } else {
+                // Fallback if CursorMovementService fails
+                self.convert_point_to_character_index(event.position, window)
+            }
+        } else {
+            // Fallback to old method if no element bounds available
+            self.convert_point_to_character_index(event.position, window)
+        };
+        
         log_position_flow(
             "1-COORDINATE_CONVERSION",
             character_position,
-            "from convert_point_to_character_index",
+            "from unified cursor movement system",
         );
 
         // ENG-140: Check for Shift modifier for selection extension
@@ -98,26 +117,81 @@ impl MarkdownEditor {
             cx.notify();
         }
     }
+    
+    pub(super) fn handle_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Handle scroll wheel events for vertical scrolling
+        // ScrollDelta can be in Lines or Pixels
+        let scroll_amount = match event.delta {
+            gpui::ScrollDelta::Lines(lines) => {
+                eprintln!("🖱️ SCROLL: Lines delta: {:?}", lines);
+                // Convert lines to pixels (using line height of 24px)
+                lines.y * 24.0 * 3.0 // Multiply by 3 for smoother scrolling
+            }
+            gpui::ScrollDelta::Pixels(pixels) => {
+                eprintln!("🖱️ SCROLL: Pixels delta: {:?}", pixels);
+                pixels.y.0
+            }
+        };
+        
+        eprintln!("🖱️ SCROLL: scroll_amount: {}", scroll_amount);
+        
+        // Get current scroll state before change
+        let old_offset = self.viewport_manager.scroll_state().vertical_offset();
+        
+        // Apply the scroll (negative because scrolling down moves content up)
+        self.viewport_manager.scroll_state_mut().scroll_by(-scroll_amount);
+        
+        // ENG-185: Calculate total document height accounting for viewport culling
+        // Get the total logical lines in the document
+        let content = self.document.content();
+        let total_logical_lines = content.lines().count().max(1);
+        
+        // Use VisualLineManager to calculate total height considering line wrapping
+        let actual_height = self.visual_line_manager.calculate_total_document_height(total_logical_lines, 24.0);
+        self.viewport_manager.scroll_state_mut().set_document_height(actual_height);
+        
+        // Debug: print scroll state information
+        let scroll_state = self.viewport_manager.scroll_state();
+        let line_count = self.document.content().lines().count();
+        eprintln!("🖱️ SCROLL DEBUG: total_lines: {}", line_count);
+        eprintln!("🖱️ SCROLL DEBUG: document_height: {:.1}px", scroll_state.document_height());
+        eprintln!("🖱️ SCROLL DEBUG: viewport_height: {:.1}px", scroll_state.viewport_height());
+        eprintln!("🖱️ SCROLL DEBUG: max_scroll_position: {:.1}px", scroll_state.max_scroll_position());
+        eprintln!("🖱️ SCROLL DEBUG: is_scrollable: {}", scroll_state.is_scrollable());
+        
+        let new_offset = self.viewport_manager.scroll_state().vertical_offset();
+        eprintln!("🖱️ SCROLL: offset changed from {} to {}", old_offset, new_offset);
+        
+        // Request a re-render
+        cx.notify();
+    }
 
-    // Enhanced method to convert screen coordinates to character positions using Point-based system
-    // This provides much better accuracy than the previous fixed-approximation approach
+    // Enhanced method to convert screen coordinates to character positions using visual line system
+    // This accounts for line wrapping and provides accurate positioning in wrapped text
     pub(super) fn convert_point_to_character_index(
         &self,
         screen_point: Point<Pixels>,
         window: &mut Window,
     ) -> usize {
-        // First, convert screen coordinates to text coordinates (Point)
+        // Convert screen coordinates to visual line coordinates
+        let visual_position = self.convert_screen_to_visual_position(screen_point, window);
+        
+        // Use visual navigation to convert to logical offset
+        if let Some(logical_offset) = visual_position {
+            return logical_offset;
+        }
+        
+        // Fallback to the old method if visual conversion fails
         let text_point = self.convert_screen_to_text_point(screen_point, window);
-
-        // Then use coordinate mapper to convert Point to offset
         let content = self.document.content();
         let rope = Rope::from_str(&content);
         let mapper = RopeCoordinateMapper::new(rope);
-
-        // Clamp the point to valid document bounds
         let clamped_point = mapper.clamp_point(text_point);
-
-        // Convert to offset
         let calculated_offset = mapper.point_to_offset(clamped_point);
 
         // Log the conversion details
@@ -152,6 +226,132 @@ impl MarkdownEditor {
 
         calculated_offset
     }
+    
+    /// Convert screen coordinates to logical character position using actual visual line system
+    /// This handles wrapped lines correctly by using actual GPUI-rendered visual lines
+    fn convert_screen_to_visual_position(
+        &self,
+        screen_point: Point<Pixels>,
+        window: &mut Window,
+    ) -> Option<usize> {
+        let content = self.document.content();
+        let visual_line_manager = self.visual_line_manager();
+        
+        eprintln!("DEBUG MOUSE: Converting screen point {:?} to visual position using actual visual lines", screen_point);
+        eprintln!("DEBUG MOUSE: Have {} visual lines available", visual_line_manager.visual_line_count());
+        
+        if visual_line_manager.visual_line_count() == 0 {
+            eprintln!("DEBUG MOUSE: No visual lines available - cannot convert coordinates");
+            return None;
+        }
+        
+        // Get element bounds for coordinate calculations
+        let element_bounds = self.element_bounds?;
+        let padding = px(16.0);
+        let _line_height = px(24.0);
+        
+        // ENG-186: Account for scroll offset in coordinate mapping
+        let scroll_offset = self.viewport_manager.scroll_state().vertical_offset();
+        
+        // Find the visual line that contains the click Y coordinate
+        let mut target_visual_line_idx = 0;
+        let mut best_distance = f32::MAX;
+        
+        for visual_idx in 0..visual_line_manager.visual_line_count() {
+            if let Some(y_pos) = visual_line_manager.get_y_position(visual_idx) {
+                // FIXED: Y positions are now document-relative, convert to screen coordinates
+                // When scrolled down, document content appears higher on screen
+                let absolute_y = element_bounds.origin.y.0 + padding.0 + y_pos - scroll_offset;
+                let distance = (screen_point.y.0 - absolute_y).abs();
+                
+                if visual_idx < 5 || distance < best_distance {
+                    eprintln!("DEBUG MOUSE: Visual line {}: Y={:.1}, distance={:.1}", visual_idx, absolute_y, distance);
+                }
+                
+                if distance < best_distance {
+                    best_distance = distance;
+                    target_visual_line_idx = visual_idx;
+                }
+            }
+        }
+        
+        eprintln!("DEBUG MOUSE: Selected visual line {} (distance={:.1})", 
+            target_visual_line_idx, best_distance);
+        
+        // Get the actual visual line to determine column position
+        let visual_lines = visual_line_manager.all_visual_lines();
+        if let Some(target_visual_line) = visual_lines.get(target_visual_line_idx) {
+            // Calculate column within the visual line using actual GPUI text measurement
+            let relative_x = screen_point.x.0 - element_bounds.origin.x.0 - padding.0;
+            
+            // Use GPUI text shaping to find the correct character position
+            let mut best_char_pos = 0;
+            let mut best_distance = f32::MAX;
+            
+            // Get the text once to avoid borrowing issues
+            let visual_line_text = target_visual_line.text();
+            
+            // Measure the width of each character prefix to find the closest position
+            for char_pos in 0..=target_visual_line.len() {
+                // CRITICAL FIX: Convert character position to safe byte boundary for string slicing
+                let text_slice = visual_line_text.chars().take(char_pos).collect::<String>();
+                
+                // Use GPUI for actual text measurement
+                if !text_slice.is_empty() && !target_visual_line.segments.is_empty() {
+                    let first_segment = &target_visual_line.segments[0];
+                    let shaped_line = window.text_system().shape_line(
+                        text_slice.to_string().into(),
+                        px(first_segment.font_size),
+                        &[first_segment.text_run.clone()],
+                        None,
+                    );
+                    
+                    let text_width = shaped_line.width.0;
+                    let distance = (relative_x - text_width).abs();
+                    
+                    if distance < best_distance {
+                        best_distance = distance;
+                        best_char_pos = char_pos;
+                    }
+                } else if char_pos == 0 {
+                    // Handle empty text case
+                    let distance = relative_x.abs();
+                    if distance < best_distance {
+                        best_distance = distance;
+                        best_char_pos = 0;
+                    }
+                }
+            }
+            
+            eprintln!("DEBUG MOUSE: Screen X: {:.1}, best char position: {} (distance={:.1})", 
+                screen_point.x.0, best_char_pos, best_distance);
+            
+            // Convert visual position to logical position
+            let visual_column = best_char_pos;
+            let logical_column = target_visual_line.start_offset + visual_column;
+            
+            // Get the logical line from the visual line
+            let rope = ropey::Rope::from_str(&content);
+            let logical_line = target_visual_line.logical_line;
+            
+            if logical_line < rope.len_lines() {
+                let max_line_chars = rope.line(logical_line).len_chars().saturating_sub(1);
+                let clamped_column = logical_column.min(max_line_chars);
+                let logical_offset = rope.line_to_char(logical_line) + clamped_column;
+                
+                eprintln!("DEBUG MOUSE: SUCCESS! Visual line {} pos {} -> Logical line {} col {} -> offset {}", 
+                    target_visual_line_idx, visual_column, logical_line, clamped_column, logical_offset);
+                
+                Some(logical_offset)
+            } else {
+                eprintln!("DEBUG MOUSE: Invalid logical line {} (max {})", logical_line, rope.len_lines());
+                None
+            }
+        } else {
+            eprintln!("DEBUG MOUSE: Cannot get visual line at index {}", target_visual_line_idx);
+            None
+        }
+    }
 
     // Convert screen coordinates to text coordinates (Point)
     fn convert_screen_to_text_point(
@@ -160,7 +360,13 @@ impl MarkdownEditor {
         window: &mut Window,
     ) -> TextPoint {
         let content_bounds = self.calculate_text_content_bounds();
-        let relative_y = screen_point.y - content_bounds.top_offset;
+        
+        // ENG-186: Account for scroll offset in coordinate mapping (fallback method)
+        let scroll_offset = self.viewport_manager.scroll_state().vertical_offset();
+        
+        // Adjust Y coordinate to account for scroll - when scrolled down, content appears higher on screen
+        // So we need to add the scroll offset to get the position relative to the document origin
+        let relative_y = screen_point.y - content_bounds.top_offset + px(scroll_offset);
         let relative_x = screen_point.x - content_bounds.left_offset;
 
         // Log the coordinate transformation with debugging
@@ -174,7 +380,11 @@ impl MarkdownEditor {
             content_bounds.top_offset.0, content_bounds.left_offset.0
         );
         eprintln!(
-            "  ➡️  Relative coordinates: ({:.1}, {:.1})px",
+            "  📜 Scroll offset: {:.1}px",
+            scroll_offset
+        );
+        eprintln!(
+            "  ➡️  Relative coordinates (with scroll): ({:.1}, {:.1})px",
             relative_x.0, relative_y.0
         );
 
@@ -379,13 +589,6 @@ impl MarkdownEditor {
     }
 
     // Calculate line height based on content (headings are taller) - original method for backward compatibility
-    fn calculate_line_height_for_content(
-        &self,
-        line_content: &str,
-        line_start_pos: usize,
-    ) -> Pixels {
-        px(self.calculate_line_height_for_content_pixels(line_content))
-    }
 
     // Calculate column position from X coordinate using GPUI text measurement - pixel perfect!
     fn calculate_column_from_x_position_with_actual_measurement(
@@ -711,7 +914,7 @@ impl MarkdownEditor {
         &self,
         line_content: &str,
         x_position: Pixels,
-        line_start_pos: usize,
+        _line_start_pos: usize,
     ) -> usize {
         if line_content.is_empty() {
             return 0;
@@ -725,7 +928,7 @@ impl MarkdownEditor {
             let estimated_x = self.estimate_x_position_for_character_offset(
                 line_content,
                 char_offset,
-                line_start_pos,
+                _line_start_pos,
             );
             let distance = (estimated_x.0 - x_position.0).abs();
 
@@ -743,7 +946,7 @@ impl MarkdownEditor {
         &self,
         line_content: &str,
         char_offset: usize,
-        line_start_pos: usize,
+        _line_start_pos: usize,
     ) -> Pixels {
         if char_offset == 0 {
             return px(0.0);
@@ -937,6 +1140,24 @@ impl MarkdownEditor {
         self.document.clear_selection();
 
         true // Successfully handled
+    }
+    
+    /// Handle click using screen coordinates - preferred for mouse input
+    pub fn handle_click_at_screen_position(&mut self, screen_point: Point<Pixels>, window: &mut Window) -> bool {
+        if let Some(element_bounds) = self.element_bounds {
+            self.cursor_movement.move_to_screen_position(
+                &mut self.document,
+                screen_point.x.0,
+                screen_point.y.0,
+                element_bounds,
+                &self.visual_line_manager,
+                window,
+            )
+        } else {
+            // Fallback to old method if no element bounds available
+            let position = self.convert_point_to_character_index(screen_point, window);
+            self.handle_click_at_position(position)
+        }
     }
 
     pub fn handle_mouse_down_at_position(&mut self, position: usize) -> bool {

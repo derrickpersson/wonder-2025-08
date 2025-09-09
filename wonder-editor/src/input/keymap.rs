@@ -221,6 +221,56 @@ impl Keymap {
         self.bind(KeyBinding::new("pageup"), EditorAction::PageUp);
         self.bind(KeyBinding::new("pagedown"), EditorAction::PageDown);
 
+        // ENG-191: Keyboard scroll navigation
+        // Alt+Up/Down - Scroll without moving cursor (commonly used in editors)
+        self.bind(
+            KeyBinding::with_modifiers("up", Modifiers::alt()),
+            EditorAction::ScrollUp
+        );
+        self.bind(
+            KeyBinding::with_modifiers("down", Modifiers::alt()),
+            EditorAction::ScrollDown
+        );
+        
+        // Function keys for scroll navigation (avoiding conflicts)
+        // F6/F7 - Scroll up/down (alternative bindings)
+        self.bind(
+            KeyBinding::new("f6"),
+            EditorAction::ScrollUp
+        );
+        self.bind(
+            KeyBinding::new("f7"),
+            EditorAction::ScrollDown
+        );
+        
+        // Alt+PageUp/PageDown - Scroll by page (avoiding Ctrl conflicts)
+        self.bind(
+            KeyBinding::with_modifiers("pageup", Modifiers::alt()),
+            EditorAction::ScrollPageUp
+        );
+        self.bind(
+            KeyBinding::with_modifiers("pagedown", Modifiers::alt()),
+            EditorAction::ScrollPageDown
+        );
+        
+        // Ctrl/Cmd + Alt + Up/Down - Scroll to top/bottom (unique combination)
+        self.bind(
+            KeyBinding::with_modifiers("up", Modifiers { cmd: true, alt: true, ..Default::default() }),
+            EditorAction::ScrollToTop
+        );
+        self.bind(
+            KeyBinding::with_modifiers("down", Modifiers { cmd: true, alt: true, ..Default::default() }),
+            EditorAction::ScrollToBottom
+        );
+        self.bind(
+            KeyBinding::with_modifiers("up", Modifiers { ctrl: true, alt: true, ..Default::default() }),
+            EditorAction::ScrollToTop
+        );
+        self.bind(
+            KeyBinding::with_modifiers("down", Modifiers { ctrl: true, alt: true, ..Default::default() }),
+            EditorAction::ScrollToBottom
+        );
+
         // Select all (Cmd/Ctrl + A)
         self.bind(
             KeyBinding::with_modifiers("a", Modifiers::cmd()),

@@ -158,6 +158,7 @@ impl Render for MarkdownEditor {
             .on_mouse_up(gpui::MouseButton::Left, cx.listener(Self::handle_mouse_up))
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
             .on_key_down(cx.listener(Self::handle_key_down))
+            .on_scroll_wheel(cx.listener(Self::handle_scroll_wheel))
             .size_full()
             .flex()
             .flex_col()
@@ -173,6 +174,10 @@ impl Render for MarkdownEditor {
                         cursor_position,
                         selection,
                         hybrid_renderer: self.hybrid_renderer.clone(),
+                        visual_line_manager: crate::rendering::VisualLineManager::new(),
+                        scroll_offset: self.scroll_offset(),
+                        // ENG-189: Initialize actual bounds as None - will be set during paint
+                        actual_bounds: None,
                     },
                 ),
             )

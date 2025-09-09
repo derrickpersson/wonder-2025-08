@@ -96,6 +96,42 @@ impl TextDocument {
 - **Clear Naming**: Use descriptive names for functions, variables, and modules
 - **No Premature Optimization**: Focus on correctness first, optimize when needed
 
+## Critical Implementation Principles
+
+### ALWAYS Use Actual GPUI Rendering Values - NEVER Estimate
+**CRITICAL**: When working with text layout, visual lines, cursor positioning, or any rendering-related functionality:
+
+- **✅ ALWAYS** use actual values from GPUI's text rendering system
+- **✅ ALWAYS** get real font metrics, character widths, and line positions from GPUI
+- **✅ ALWAYS** use the actual visual lines generated during the GPUI layout phase
+- **❌ NEVER** estimate character widths (e.g., assuming 8px per character)
+- **❌ NEVER** estimate line wrapping positions based on character counts
+- **❌ NEVER** approximate visual line boundaries without actual rendering data
+
+**Why This Matters:**
+- Text rendering is complex - fonts have variable character widths, kerning, ligatures, etc.
+- Different characters have vastly different widths (e.g., 'i' vs 'W' vs '😀')
+- Line wrapping depends on actual pixel measurements, not character counts
+- Estimates will ALWAYS be wrong and lead to broken cursor positioning, selection, and navigation
+
+**Correct Approach:**
+```rust
+// ✅ CORRECT: Use actual GPUI measurements
+let shaped_line = window.text_system().shape_line(text, font_size, &runs, wrap_width);
+let actual_line_width = shaped_line.width;
+let actual_visual_lines = line_wrapper.wrap_line(logical_line, text, cursor, selection, window);
+
+// ❌ WRONG: Estimating values
+let estimated_chars_per_line = wrap_width / 8.0; // NEVER DO THIS
+let estimated_line_breaks = text.len() / 80; // NEVER DO THIS
+```
+
+**Implementation Strategy:**
+1. During the GPUI layout phase (`request_layout`), generate and store actual visual lines
+2. During the paint phase, use those stored visual lines for cursor/selection rendering
+3. For testing, either mock the GPUI window properly or test at the integration level
+4. If GPUI values aren't available yet, defer the operation rather than estimating
+
 ## Testing Commands
 ```bash
 # Run all tests

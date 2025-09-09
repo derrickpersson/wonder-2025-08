@@ -3,7 +3,7 @@ use crate::markdown_parser::{ParsedToken, MarkdownParser};
 use crate::rendering::{
     TextContent, StyleContext, TokenRenderMode, Typography,
     StyledTextSegment, HybridLayoutElement, HeadingTypographyStyle,
-    CoordinateMapper, TextRunGenerator, LayoutManager,
+    CoordinateMapper, TextRunGenerator, LayoutManager, HybridLineWrapper,
 };
 use gpui::TextRun;
 
@@ -13,6 +13,7 @@ pub struct HybridTextRenderer {
     coordinate_mapper: CoordinateMapper,
     text_run_generator: TextRunGenerator,
     layout_manager: LayoutManager,
+    line_wrapper: HybridLineWrapper,
 }
 
 impl HybridTextRenderer {
@@ -22,7 +23,34 @@ impl HybridTextRenderer {
             coordinate_mapper: CoordinateMapper::new(),
             text_run_generator: TextRunGenerator::new(),
             layout_manager: LayoutManager::new(),
+            line_wrapper: HybridLineWrapper::disabled(), // Start with line wrapping disabled by default
         }
+    }
+    
+    /// Create a new hybrid renderer with line wrapping enabled at the specified width
+    pub fn with_line_wrapping(wrap_width: gpui::Pixels) -> Self {
+        Self {
+            parser: MarkdownParser::new(),
+            coordinate_mapper: CoordinateMapper::new(),
+            text_run_generator: TextRunGenerator::new(),
+            layout_manager: LayoutManager::new(),
+            line_wrapper: HybridLineWrapper::new(wrap_width),
+        }
+    }
+    
+    /// Enable or disable line wrapping
+    pub fn set_line_wrapping_enabled(&mut self, enabled: bool) {
+        self.line_wrapper.set_enabled(enabled);
+    }
+    
+    /// Update the wrap width for line wrapping
+    pub fn set_wrap_width(&mut self, wrap_width: gpui::Pixels) {
+        self.line_wrapper.set_wrap_width(wrap_width);
+    }
+    
+    /// Clear the line wrapper cache (call when text content changes)
+    pub fn invalidate_line_wrapping_cache(&mut self) {
+        self.line_wrapper.invalidate_cache();
     }
     
     /// Returns the tokens in the given markdown content with their render modes
@@ -68,6 +96,11 @@ impl HybridTextRenderer {
     
     pub fn get_line_height_for_font_size(&self, font_size: f32) -> f32 {
         Typography::get_line_height_for_font_size(font_size)
+    }
+    
+    /// Get reference to the line wrapper for coordinate mapping
+    pub fn line_wrapper(&self) -> &HybridLineWrapper {
+        &self.line_wrapper
     }
     
     // Typography style methods - delegated to Typography module
@@ -186,6 +219,44 @@ impl HybridTextRenderer {
     
     pub fn get_token_render_mode(&self, token: &ParsedToken, cursor_position: usize, selection: Option<Range<usize>>) -> TokenRenderMode {
         TokenRenderMode::get_for_token(token, cursor_position, selection)
+    }
+    
+    /// Wrap a line and return visual lines with styling preserved
+    pub fn wrap_line(
+        &mut self,
+        logical_line_index: usize,
+        line_content: &str,
+        cursor_position: usize,
+        selection: Option<Range<usize>>,
+        document_version: u64,
+        window: &mut gpui::Window,
+    ) -> Vec<crate::rendering::VisualLine> {
+        self.line_wrapper.wrap_line(
+            logical_line_index,
+            line_content,
+            cursor_position,
+            selection,
+            document_version,
+            window,
+        )
+    }
+    
+    /// Convert logical position to visual position (for line wrapping)
+    pub fn logical_to_visual_position(
+        &self,
+        logical_line: usize, 
+        logical_column: usize
+    ) -> Option<crate::rendering::VisualPosition> {
+        self.line_wrapper.logical_to_visual_position(logical_line, logical_column)
+    }
+    
+    /// Convert visual position to logical position (for line wrapping)
+    pub fn visual_to_logical_position(
+        &self,
+        visual_line: usize,
+        visual_column: usize
+    ) -> Option<(usize, usize)> {
+        self.line_wrapper.visual_to_logical_position(visual_line, visual_column)
     }
 }
 

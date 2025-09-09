@@ -8,7 +8,7 @@ impl EditorElement {
     pub(super) fn paint_selection(
         &self,
         bounds: Bounds<Pixels>,
-        shaped_lines: &[ShapedLine],
+        _shaped_lines: &[ShapedLine],
         selection_range: std::ops::Range<usize>,
         window: &mut Window,
     ) {
@@ -23,212 +23,170 @@ impl EditorElement {
 
         let content = &self.content;
         let mut char_offset = 0;
-        let mut y_offset = padding;
-        let font_size = px(16.0);
 
-        // Process each line with its corresponding shaped line
+        // Process each logical line to find selections
         let lines: Vec<&str> = content.lines().collect();
-        for (line_index, line_text) in lines.iter().enumerate() {
+        for (logical_line, line_text) in lines.iter().enumerate() {
             let line_start = char_offset;
             let line_end = char_offset + line_text.len();
             
-            // Check if this line intersects with the selection
+            // Check if this logical line intersects with the selection
             if selection_range.end > line_start && selection_range.start <= line_end {
-                // Calculate the selection bounds within this line (original coordinates)
+                // Calculate the selection bounds within this logical line
                 let sel_start_in_line = selection_range.start.saturating_sub(line_start);
                 let sel_end_in_line = (selection_range.end.min(line_end) - line_start).min(line_text.len());
                 
-                if sel_start_in_line < sel_end_in_line && line_index < shaped_lines.len() {
-                    // Calculate cursor position for this line
-                    let line_cursor_pos = if self.cursor_position >= line_start && self.cursor_position <= line_end {
-                        self.cursor_position - line_start
-                    } else {
-                        usize::MAX
-                    };
-
-                    // Calculate line selection
-                    let line_selection = Some(sel_start_in_line..sel_end_in_line);
-
-                    // Get the transformed content and text runs for this line
-                    let line_display_text = self.hybrid_renderer.get_display_content(*line_text, line_cursor_pos, line_selection.clone());
-                    let line_runs = self.hybrid_renderer.generate_mixed_text_runs(*line_text, line_cursor_pos, line_selection.clone());
-
-                    // Map selection positions from original to transformed coordinates
-                    let transformed_start = self.hybrid_renderer.map_cursor_position(*line_text, sel_start_in_line, line_selection.clone());
-                    let transformed_end = self.hybrid_renderer.map_cursor_position(*line_text, sel_end_in_line, line_selection.clone());
-
-                    // Calculate x positions using transformed content
-                    let x_start = if transformed_start == 0 {
-                        padding
-                    } else {
-                        let text_to_sel_start = line_display_text.chars().take(transformed_start).collect::<String>();
-                        if !text_to_sel_start.is_empty() {
-                            if line_runs.is_empty() {
-                                // Fallback to simple measurement
-                                let text_run = TextRun {
-                                    len: text_to_sel_start.len(),
-                                    font: gpui::Font {
-                                        family: "SF Pro".into(),
-                                        features: gpui::FontFeatures::default(),
-                                        weight: gpui::FontWeight::NORMAL,
-                                        style: gpui::FontStyle::Normal,
-                                        fallbacks: None,
-                                    },
-                                    color: rgb(0xcdd6f4).into(),
-                                    background_color: None,
-                                    underline: None,
-                                    strikethrough: None,
-                                };
-                                let shaped = window.text_system().shape_line(
-                                    text_to_sel_start.into(),
-                                    font_size,
-                                    &[text_run],
-                                    None,
-                                );
-                                padding + shaped.width
-                            } else {
-                                // Use the proper text runs for accurate measurement
-                                let mut runs_for_start = Vec::new();
-                                let mut run_pos = 0;
-                                
-                                for run in &line_runs {
-                                    if run_pos >= transformed_start {
-                                        break;
-                                    }
-                                    
-                                    if run_pos + run.len <= transformed_start {
-                                        runs_for_start.push(run.clone());
-                                        run_pos += run.len;
-                                    } else {
-                                        let partial_len = transformed_start - run_pos;
-                                        runs_for_start.push(TextRun {
-                                            len: partial_len,
-                                            font: run.font.clone(),
-                                            color: run.color,
-                                            background_color: run.background_color,
-                                            underline: run.underline.clone(),
-                                            strikethrough: run.strikethrough.clone(),
-                                        });
-                                        break;
-                                    }
-                                }
-                                
-                                if !runs_for_start.is_empty() {
-                                    let shaped = window.text_system().shape_line(
-                                        text_to_sel_start.into(),
-                                        font_size,
-                                        &runs_for_start,
-                                        None,
-                                    );
-                                    padding + shaped.width
-                                } else {
-                                    padding
-                                }
-                            }
-                        } else {
-                            padding
+                if sel_start_in_line < sel_end_in_line {
+                    // Find all visual lines in this logical line that contain selection
+                    let visual_lines_with_selection = self.visual_line_manager
+                        .find_visual_lines_in_selection(logical_line, sel_start_in_line, sel_end_in_line);
+                    
+                    for (visual_line_idx, visual_line) in visual_lines_with_selection {
+                        // Calculate selection bounds within this visual line
+                        let vl_sel_start = sel_start_in_line.max(visual_line.start_offset) - visual_line.start_offset;
+                        let vl_sel_end = sel_end_in_line.min(visual_line.end_offset) - visual_line.start_offset;
+                        
+                        if vl_sel_start < vl_sel_end {
+                            // Use the simplified paint method for this visual line
+                            self.paint_visual_line_selection_simple(
+                                bounds,
+                                &visual_line.text(),
+                                vl_sel_start,
+                                vl_sel_end,
+                                visual_line_idx,
+                                padding,
+                                line_height,
+                                selection_color,
+                                window,
+                            );
                         }
-                    };
-                    
-                    // Calculate x_end using transformed content
-                    let x_end = {
-                        let text_to_sel_end = line_display_text.chars().take(transformed_end).collect::<String>();
-                        if !text_to_sel_end.is_empty() {
-                            if line_runs.is_empty() {
-                                // Fallback to simple measurement
-                                let text_run = TextRun {
-                                    len: text_to_sel_end.len(),
-                                    font: gpui::Font {
-                                        family: "SF Pro".into(),
-                                        features: gpui::FontFeatures::default(),
-                                        weight: gpui::FontWeight::NORMAL,
-                                        style: gpui::FontStyle::Normal,
-                                        fallbacks: None,
-                                    },
-                                    color: rgb(0xcdd6f4).into(),
-                                    background_color: None,
-                                    underline: None,
-                                    strikethrough: None,
-                                };
-                                let shaped = window.text_system().shape_line(
-                                    text_to_sel_end.into(),
-                                    font_size,
-                                    &[text_run],
-                                    None,
-                                );
-                                padding + shaped.width
-                            } else {
-                                // Use the proper text runs for accurate measurement
-                                let mut runs_for_end = Vec::new();
-                                let mut run_pos = 0;
-                                
-                                for run in &line_runs {
-                                    if run_pos >= transformed_end {
-                                        break;
-                                    }
-                                    
-                                    if run_pos + run.len <= transformed_end {
-                                        runs_for_end.push(run.clone());
-                                        run_pos += run.len;
-                                    } else {
-                                        let partial_len = transformed_end - run_pos;
-                                        runs_for_end.push(TextRun {
-                                            len: partial_len,
-                                            font: run.font.clone(),
-                                            color: run.color,
-                                            background_color: run.background_color,
-                                            underline: run.underline.clone(),
-                                            strikethrough: run.strikethrough.clone(),
-                                        });
-                                        break;
-                                    }
-                                }
-                                
-                                if !runs_for_end.is_empty() {
-                                    let shaped = window.text_system().shape_line(
-                                        text_to_sel_end.into(),
-                                        font_size,
-                                        &runs_for_end,
-                                        None,
-                                    );
-                                    padding + shaped.width
-                                } else {
-                                    padding
-                                }
-                            }
-                        } else {
-                            padding
-                        }
-                    };
-                    
-                    // Paint selection rectangle for this line
-                    // For empty lines, show a minimum width selection to indicate the line is selected
-                    let selection_width = if x_end > x_start {
-                        x_end - x_start
-                    } else {
-                        // Empty line: show a small visual indicator (about 4 pixels wide)
-                        px(4.0)
-                    };
-                    
-                    if selection_width > px(0.0) {
-                        window.paint_quad(gpui::PaintQuad {
-                            bounds: Bounds {
-                                origin: bounds.origin + gpui::point(x_start, y_offset),
-                                size: size(selection_width, line_height),
-                            },
-                            background: selection_color.into(),
-                            border_widths: gpui::Edges::all(px(0.0)),
-                            border_color: transparent_black().into(),
-                            border_style: gpui::BorderStyle::Solid,
-                            corner_radii: gpui::Corners::all(px(0.0)),
-                        });
                     }
                 }
             }
             
-            // Move to next line
+            // Move to next logical line
             char_offset = line_end + 1; // +1 for newline character
-            y_offset += line_height;
+        }
+    }
+
+    fn paint_visual_line_selection_simple(
+        &self,
+        bounds: Bounds<Pixels>,
+        visual_line_text: &str,
+        sel_start: usize,
+        sel_end: usize,
+        visual_line_index: usize,
+        padding: Pixels,
+        line_height: Pixels,
+        selection_color: gpui::Rgba,
+        window: &mut Window,
+    ) {
+        let font_size = px(16.0);
+
+        // ENG-190: Apply scroll offset to selection rendering
+        let scroll_offset_px = px(self.scroll_offset);
+        
+        // Use VisualLineManager to get Y position with scroll offset handled internally
+        let y_pos = if let Some(bounds_point) = self.visual_line_manager.get_visual_line_bounds(
+            visual_line_index, 
+            bounds.origin, 
+            padding, 
+            line_height,
+            self.scroll_offset
+        ) {
+            bounds_point.y
+        } else {
+            // Fallback calculation with scroll offset
+            bounds.origin.y + padding + (line_height * visual_line_index as f32) - scroll_offset_px
+        };
+
+        // Calculate X start position
+        let x_start = if sel_start == 0 {
+            bounds.origin.x + padding
+        } else {
+            let text_before = visual_line_text.chars().take(sel_start).collect::<String>();
+            if !text_before.is_empty() {
+                let text_run = TextRun {
+                    len: text_before.len(),
+                    font: gpui::Font {
+                        family: "SF Pro".into(),
+                        features: gpui::FontFeatures::default(),
+                        weight: gpui::FontWeight::NORMAL,
+                        style: gpui::FontStyle::Normal,
+                        fallbacks: None,
+                    },
+                    color: rgb(0xcdd6f4).into(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let shaped = window.text_system().shape_line(
+                    text_before.into(),
+                    font_size,
+                    &[text_run],
+                    None,
+                );
+                bounds.origin.x + padding + shaped.width
+            } else {
+                bounds.origin.x + padding
+            }
+        };
+
+        // Calculate X end position
+        let x_end = {
+            let text_to_end = visual_line_text.chars().take(sel_end).collect::<String>();
+            if !text_to_end.is_empty() {
+                let text_run = TextRun {
+                    len: text_to_end.len(),
+                    font: gpui::Font {
+                        family: "SF Pro".into(),
+                        features: gpui::FontFeatures::default(),
+                        weight: gpui::FontWeight::NORMAL,
+                        style: gpui::FontStyle::Normal,
+                        fallbacks: None,
+                    },
+                    color: rgb(0xcdd6f4).into(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let shaped = window.text_system().shape_line(
+                    text_to_end.into(),
+                    font_size,
+                    &[text_run],
+                    None,
+                );
+                bounds.origin.x + padding + shaped.width
+            } else {
+                bounds.origin.x + padding
+            }
+        };
+
+        // ENG-188: Only paint selection if it's visible in the current viewport
+        let selection_is_visible = y_pos >= bounds.origin.y && y_pos < bounds.origin.y + bounds.size.height;
+        if !selection_is_visible {
+            return; // Skip painting selection outside viewport
+        }
+        
+        // Paint selection rectangle
+        let selection_width = if x_end > x_start {
+            x_end - x_start
+        } else {
+            px(4.0) // Minimum visible width
+        };
+
+        if selection_width > px(0.0) {
+            window.paint_quad(gpui::PaintQuad {
+                bounds: Bounds {
+                    origin: gpui::point(x_start, y_pos),
+                    size: size(selection_width, line_height),
+                },
+                background: selection_color.into(),
+                border_widths: gpui::Edges::all(px(0.0)),
+                border_color: transparent_black().into(),
+                border_style: gpui::BorderStyle::Solid,
+                corner_radii: gpui::Corners::all(px(0.0)),
+            });
         }
     }
 
@@ -239,29 +197,16 @@ impl EditorElement {
         
         eprintln!("DEBUG RENDER: Painting cursor at original position: {}", original_cursor_position);
         eprintln!("DEBUG RENDER: Content length: {}", content.len());
-        
-        // Map cursor position to transformed content coordinates
-        let transformed_cursor_position = self.hybrid_renderer.map_cursor_position(
-            content.as_str(), 
-            original_cursor_position, 
-            self.selection.clone()
-        );
-        
-        eprintln!("DEBUG RENDER: Transformed cursor position: {}", transformed_cursor_position);
 
-        // Calculate which line the cursor is on based on ORIGINAL content (for line counting)
+        // Calculate which logical line the cursor is on
         let chars_before_cursor: String = content.chars().take(original_cursor_position).collect();
-        let line_number = chars_before_cursor.matches('\n').count();
+        let logical_line = chars_before_cursor.matches('\n').count();
         
-        eprintln!("DEBUG RENDER: Cursor is on line {} (0-based)", line_number);
+        eprintln!("DEBUG RENDER: Cursor is on logical line {} (0-based)", logical_line);
 
-        // Get the actual line content from original text
-        let current_line_original = content.lines().nth(line_number).unwrap_or("");
-        eprintln!("DEBUG RENDER: Line content: {:?}", current_line_original);
-        
-        // Find cursor position within this specific line (original coordinates)
+        // Find cursor position within this logical line
         let lines_before: Vec<&str> = chars_before_cursor.lines().collect();
-        let original_position_in_line = if chars_before_cursor.ends_with('\n') {
+        let position_in_logical_line = if chars_before_cursor.ends_with('\n') {
             0
         } else {
             lines_before
@@ -270,28 +215,27 @@ impl EditorElement {
                 .unwrap_or(0)
         };
 
-        // Calculate the selection for this line
-        let line_start_offset = content.lines().take(line_number).map(|l| l.len() + 1).sum::<usize>(); // +1 for newlines
-        let line_cursor_pos = if original_cursor_position >= line_start_offset && original_cursor_position <= line_start_offset + current_line_original.len() {
-            original_cursor_position - line_start_offset
-        } else {
-            usize::MAX
-        };
-        
-        let line_selection = self.selection.as_ref().and_then(|sel| {
-            let line_end = line_start_offset + current_line_original.len();
-            if sel.end > line_start_offset && sel.start <= line_end {
-                let adjusted_start = sel.start.saturating_sub(line_start_offset);
-                let adjusted_end = (sel.end - line_start_offset).min(current_line_original.len());
-                Some(adjusted_start..adjusted_end)
+        // Use VisualLineManager to find the visual line containing the cursor
+        let (visual_line_index, visual_line, position_in_visual_line) = 
+            if let Some((vl_idx, vl)) = self.visual_line_manager.find_visual_line_at_position(logical_line, position_in_logical_line) {
+                eprintln!("DEBUG RENDER: Found cursor in visual line {} at position {}", vl_idx, position_in_logical_line - vl.start_offset);
+                eprintln!("DEBUG RENDER: Visual line text: {:?}", vl.text());
+                (Some(vl_idx), Some(vl), position_in_logical_line - vl.start_offset)
             } else {
-                None
-            }
-        });
+                eprintln!("DEBUG RENDER: Cursor not found in visual lines");
+                (None, None, position_in_logical_line)
+            };
 
-        // Get the transformed content for this line and map cursor position within the line
-        let line_display_text = self.hybrid_renderer.get_display_content(current_line_original, line_cursor_pos, line_selection.clone());
-        let transformed_position_in_line = self.hybrid_renderer.map_cursor_position(current_line_original, original_position_in_line, line_selection.clone());
+        // Get the text content for cursor positioning
+        let (line_display_text, transformed_position_in_line) = if let Some(vl) = visual_line {
+            // Use the visual line's text content directly
+            (vl.text(), position_in_visual_line)
+        } else {
+            // Fallback: no visual line found, use original line content
+            let current_line_original = content.lines().nth(logical_line).unwrap_or("");
+            eprintln!("DEBUG RENDER: Using fallback with line content: {:?}", current_line_original);
+            (current_line_original.to_string(), position_in_logical_line)
+        };
 
         // Calculate cursor position
         let padding = px(16.0);
@@ -316,12 +260,8 @@ impl EditorElement {
             if text_up_to_cursor.is_empty() {
                 px(0.0)
             } else {
-                // Generate the actual text runs for this line so we measure correctly
-                let line_runs = self.hybrid_renderer.generate_mixed_text_runs(
-                    current_line_original, 
-                    line_cursor_pos, 
-                    line_selection
-                );
+                // For visual lines, we don't need the complex hybrid renderer logic
+                let line_runs: Vec<TextRun> = Vec::new(); // Simplified approach for refactored system
 
                 if line_runs.is_empty() {
                     // Fallback to simple measurement - TextRun.len must be in BYTES
@@ -397,7 +337,31 @@ impl EditorElement {
 
         // Create cursor bounds - a thin vertical line
         let cursor_x = bounds.origin.x + padding + cursor_x_offset;
-        let cursor_y = bounds.origin.y + padding + (line_height * line_number as f32);
+        
+        // Calculate cursor Y position using logical line position and apply scroll offset
+        let scroll_offset_px = px(self.scroll_offset);
+        let cursor_y = if let Some(vl_idx) = visual_line_index {
+            // FIXED: VisualLineManager now handles scroll offset internally
+            if let Some(origin) = self.visual_line_manager.get_visual_line_bounds(vl_idx, bounds.origin, padding, line_height, self.scroll_offset) {
+                eprintln!("DEBUG RENDER: Cursor Y from VisualLineManager: {:?}", origin.y);
+                origin.y
+            } else {
+                eprintln!("DEBUG RENDER: VisualLineManager bounds calculation failed, using fallback");
+                // For fallback, use document-relative position and apply scroll offset
+                bounds.origin.y + padding + (line_height * vl_idx as f32) - scroll_offset_px
+            }
+        } else {
+            eprintln!("DEBUG RENDER: No visual line index, using logical line: {}", logical_line);
+            // Fallback to logical line calculation with scroll offset
+            bounds.origin.y + padding + (line_height * logical_line as f32) - scroll_offset_px
+        };
+        
+        // Only paint cursor if it's visible in the current viewport
+        let cursor_is_visible = cursor_y >= bounds.origin.y && cursor_y < bounds.origin.y + bounds.size.height;
+        if !cursor_is_visible {
+            eprintln!("DEBUG RENDER: Cursor is outside viewport, skipping paint");
+            return;
+        }
         
         eprintln!("DEBUG RENDER: Final cursor position - x: {:?}, y: {:?}", cursor_x, cursor_y);
         eprintln!("DEBUG RENDER: Cursor x_offset: {:?}, padding: {:?}", cursor_x_offset, padding);

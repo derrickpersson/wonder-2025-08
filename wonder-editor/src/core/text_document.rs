@@ -13,6 +13,9 @@ pub struct TextDocument {
     selection: Selection,
     clipboard: Option<String>,
     command_history: CommandHistory,
+    /// Version number incremented on any text modification
+    /// Used for invalidating visual line caches
+    version: u64,
 }
 
 impl TextDocument {
@@ -23,6 +26,7 @@ impl TextDocument {
             selection: Selection::new(),
             clipboard: None,
             command_history: CommandHistory::new(),
+            version: 0,
         }
     }
 
@@ -35,12 +39,18 @@ impl TextDocument {
             selection: Selection::new(),
             clipboard: None,
             command_history: CommandHistory::new(),
+            version: 1, // Start at 1 since we have content
         }
     }
 
     // Content access
     pub fn content(&self) -> String {
         self.content.to_string()
+    }
+    
+    /// Get a reference to the internal rope for efficient operations
+    pub fn rope(&self) -> &Rope {
+        &self.content
     }
 
     pub fn is_empty(&self) -> bool {
@@ -49,6 +59,16 @@ impl TextDocument {
 
     pub fn len(&self) -> usize {
         self.content.len_chars()
+    }
+
+    /// Get current document version for cache invalidation
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Increment version (called internally on text modifications)
+    fn increment_version(&mut self) {
+        self.version = self.version.wrapping_add(1);
     }
 
     // Cursor operations
@@ -278,6 +298,7 @@ impl TextDocument {
                 let deleted_text = self.safe_slice(start, end);
                 let delete_command = Box::new(DeleteCommand::new(start, end, deleted_text));
                 self.execute_command_in_transaction(delete_command);
+                self.clear_selection();
                 return true;
             }
         }
@@ -403,10 +424,19 @@ impl TextDocument {
     pub fn move_cursor_up(&mut self) {
         let (line_index, column) = self.get_cursor_line_and_column();
         if line_index > 0 {
-            let new_position = self.get_position_from_line_and_column(line_index - 1, column);
+            // Get the target line to check its length
+            let target_line = self.content.line(line_index - 1);
+            let target_line_len = target_line.len_chars();
+
+            // Clamp column to target line length
+            let target_column = column.min(target_line_len);
+
+            let new_position =
+                self.get_position_from_line_and_column(line_index - 1, target_column);
             self.set_cursor_position(new_position);
         } else {
             // When on first line, move to start of document
+            // Visual line wrapping should be handled at the editor layer, not document layer
             self.set_cursor_position(0);
         }
     }
@@ -415,10 +445,30 @@ impl TextDocument {
         let (line_index, column) = self.get_cursor_line_and_column();
         // Use efficient Ropey method to check if next line exists
         if line_index + 1 < self.content.len_lines() {
-            let new_position = self.get_position_from_line_and_column(line_index + 1, column);
+            // For simple case: if at end of current line, go to start of next line
+            let current_line = self.content.line(line_index);
+            let line_len = current_line.len_chars();
+            // Don't include newline in line length for positioning (same logic as get_position_from_line_and_column)
+            let current_line_len = if line_len > 0 && current_line.char(line_len - 1) == '\n' {
+                line_len - 1
+            } else {
+                line_len
+            };
+
+            let target_column = if column >= current_line_len {
+                // At or past end of line, go to start of next line
+                0
+            } else {
+                // Preserve column position
+                column
+            };
+
+            let new_position =
+                self.get_position_from_line_and_column(line_index + 1, target_column);
             self.set_cursor_position(new_position);
         } else {
             // When on last line, move to end of document
+            // Visual line wrapping should be handled at the editor layer, not document layer
             self.set_cursor_position(self.content.len_chars());
         }
     }
@@ -650,6 +700,100 @@ impl TextDocument {
         // For rope, we can directly use char position since rope uses character indexing
         char_position.min(self.content.len_chars())
     }
+    
+    // === Smart Invalidation Methods ===
+    
+    /// Calculate which logical lines are affected by a text change at given position
+    pub fn get_affected_lines_for_position(&self, position: usize) -> Vec<usize> {
+        if self.content.len_chars() == 0 {
+            return vec![0]; // Empty document affects line 0
+        }
+        
+        let line = self.char_position_to_line(position);
+        vec![line]
+    }
+    
+    /// Calculate which logical lines are affected by text insertion
+    pub fn get_affected_lines_for_insertion(&self, position: usize, text: &str) -> Vec<usize> {
+        if text.is_empty() {
+            return vec![];
+        }
+        
+        let start_line = self.char_position_to_line(position);
+        
+        // Count newlines in inserted text to determine how many lines are affected
+        let newline_count = text.chars().filter(|&c| c == '\n').count();
+        
+        if newline_count == 0 {
+            // Simple case: no newlines, only affects current line
+            vec![start_line]
+        } else {
+            // Complex case: multiple lines affected
+            // All lines from start_line to start_line + newline_count need updating
+            // Plus any following lines that get shifted down
+            let mut affected = Vec::new();
+            for line in start_line..=start_line + newline_count {
+                affected.push(line);
+            }
+            affected
+        }
+    }
+    
+    /// Calculate which logical lines are affected by text deletion
+    pub fn get_affected_lines_for_deletion(&self, start: usize, end: usize) -> Vec<usize> {
+        if start >= end {
+            return vec![];
+        }
+        
+        let start_line = self.char_position_to_line(start);
+        let end_line = self.char_position_to_line(end.saturating_sub(1));
+        
+        // All lines from start to end are affected
+        (start_line..=end_line).collect()
+    }
+    
+    /// Calculate which logical lines are affected by a range replacement
+    pub fn get_affected_lines_for_replacement(&self, start: usize, end: usize, replacement: &str) -> Vec<usize> {
+        let mut affected = self.get_affected_lines_for_deletion(start, end);
+        let insertion_affected = self.get_affected_lines_for_insertion(start, replacement);
+        
+        // Merge both sets of affected lines
+        for line in insertion_affected {
+            if !affected.contains(&line) {
+                affected.push(line);
+            }
+        }
+        
+        affected.sort();
+        affected
+    }
+    
+    /// Convert character position to logical line number
+    pub fn char_position_to_line(&self, position: usize) -> usize {
+        if self.content.len_chars() == 0 {
+            return 0;
+        }
+        
+        let safe_position = position.min(self.content.len_chars());
+        self.content.char_to_line(safe_position)
+    }
+    
+    /// Get the character range for a logical line
+    pub fn line_to_char_range(&self, line: usize) -> (usize, usize) {
+        if self.content.len_lines() == 0 {
+            return (0, 0);
+        }
+        
+        let safe_line = line.min(self.content.len_lines().saturating_sub(1));
+        let line_start = self.content.line_to_char(safe_line);
+        let line_end = if safe_line + 1 < self.content.len_lines() {
+            self.content.line_to_char(safe_line + 1)
+        } else {
+            self.content.len_chars()
+        };
+        
+        (line_start, line_end)
+    }
 }
 
 impl Default for TextDocument {
@@ -690,21 +834,19 @@ impl ActionHandler for TextDocument {
                 self.clear_selection();
                 true
             }
-            EditorAction::ToggleFormat(format_type) => {
-                match format_type {
-                    FormatType::Bold => {
-                        self.toggle_bold();
-                        true
-                    }
-                    FormatType::Italic => {
-                        self.toggle_italic();
-                        true
-                    }
-                    FormatType::Code => {
-                        unimplemented!("Code formatting not yet implemented")
-                    }
+            EditorAction::ToggleFormat(format_type) => match format_type {
+                FormatType::Bold => {
+                    self.toggle_bold();
+                    true
                 }
-            }
+                FormatType::Italic => {
+                    self.toggle_italic();
+                    true
+                }
+                FormatType::Code => {
+                    unimplemented!("Code formatting not yet implemented")
+                }
+            },
             EditorAction::MoveToPosition(position) => {
                 self.set_cursor_position(position);
                 true
@@ -756,6 +898,14 @@ impl ActionHandler for TextDocument {
             }
             EditorAction::Undo => self.perform_undo(),
             EditorAction::Redo => self.perform_redo(),
+            
+            // ENG-191: Scroll actions are not text document operations - handled by editor
+            EditorAction::ScrollUp |
+            EditorAction::ScrollDown |
+            EditorAction::ScrollPageUp |
+            EditorAction::ScrollPageDown |
+            EditorAction::ScrollToTop |
+            EditorAction::ScrollToBottom => false,
         }
     }
 }
@@ -1148,6 +1298,9 @@ impl TextDocument {
                 }
             }
 
+            // Increment version to invalidate visual line caches
+            self.increment_version();
+
             true
         } else {
             false
@@ -1172,6 +1325,9 @@ impl TextDocument {
                     self.selection.clear();
                 }
             }
+
+            // Increment version to invalidate visual line caches
+            self.increment_version();
 
             true
         } else {
@@ -1205,6 +1361,10 @@ impl TextDocument {
 
         // Apply the new content
         self.content = new_content;
+        
+        // Increment version to invalidate visual line caches
+        self.increment_version();
+        
         true
     }
 
@@ -1760,5 +1920,135 @@ mod tests {
         // Now redo action should work
         assert!(doc.handle_action(EditorAction::Redo));
         assert_eq!(doc.content(), "Test");
+    }
+    
+    // === Smart Invalidation Tests ===
+    
+    #[test]
+    fn test_get_affected_lines_for_position() {
+        let doc = TextDocument::with_content("Line 0\nLine 1\nLine 2".to_string());
+        
+        // Test position in first line
+        assert_eq!(doc.get_affected_lines_for_position(3), vec![0]);
+        
+        // Test position in second line (after first newline)
+        assert_eq!(doc.get_affected_lines_for_position(9), vec![1]);
+        
+        // Test position in third line
+        assert_eq!(doc.get_affected_lines_for_position(15), vec![2]);
+        
+        // Test empty document
+        let empty_doc = TextDocument::new();
+        assert_eq!(empty_doc.get_affected_lines_for_position(0), vec![0]);
+    }
+    
+    #[test]
+    fn test_get_affected_lines_for_insertion() {
+        let doc = TextDocument::with_content("Line 0\nLine 1\nLine 2".to_string());
+        
+        // Test insertion with no newlines
+        assert_eq!(doc.get_affected_lines_for_insertion(3, "text"), vec![0]);
+        
+        // Test insertion with single newline
+        assert_eq!(doc.get_affected_lines_for_insertion(3, "text\n"), vec![0, 1]);
+        
+        // Test insertion with multiple newlines
+        assert_eq!(doc.get_affected_lines_for_insertion(9, "line1\nline2\nline3"), vec![1, 2, 3]);
+        
+        // Test empty insertion
+        assert_eq!(doc.get_affected_lines_for_insertion(0, ""), Vec::<usize>::new());
+    }
+    
+    #[test]
+    fn test_get_affected_lines_for_deletion() {
+        let doc = TextDocument::with_content("Line 0\nLine 1\nLine 2".to_string());
+        
+        // Test single line deletion
+        assert_eq!(doc.get_affected_lines_for_deletion(1, 5), vec![0]);
+        
+        // Test multi-line deletion
+        assert_eq!(doc.get_affected_lines_for_deletion(5, 12), vec![0, 1]);
+        
+        // Test deletion spanning three lines
+        assert_eq!(doc.get_affected_lines_for_deletion(3, 16), vec![0, 1, 2]);
+        
+        // Test empty range
+        assert_eq!(doc.get_affected_lines_for_deletion(5, 5), Vec::<usize>::new());
+        assert_eq!(doc.get_affected_lines_for_deletion(10, 5), Vec::<usize>::new()); // Invalid range
+    }
+    
+    #[test]
+    fn test_get_affected_lines_for_replacement() {
+        let doc = TextDocument::with_content("Line 0\nLine 1\nLine 2".to_string());
+        
+        // Test replacement with no newlines
+        let affected = doc.get_affected_lines_for_replacement(1, 5, "REPLACED");
+        assert_eq!(affected, vec![0]);
+        
+        // Test replacement that adds newlines
+        let affected = doc.get_affected_lines_for_replacement(1, 5, "NEW\nLINE");
+        assert_eq!(affected, vec![0, 1]);
+        
+        // Test replacement spanning multiple lines
+        let affected = doc.get_affected_lines_for_replacement(5, 15, "SINGLE");
+        assert!(affected.contains(&0));
+        assert!(affected.contains(&1));
+        assert!(affected.contains(&2));
+    }
+    
+    #[test]
+    fn test_char_position_to_line() {
+        let doc = TextDocument::with_content("Line 0\nLine 1\nLine 2".to_string());
+        
+        // Test positions in each line
+        assert_eq!(doc.char_position_to_line(0), 0); // Start of line 0
+        assert_eq!(doc.char_position_to_line(3), 0); // Middle of line 0
+        assert_eq!(doc.char_position_to_line(6), 0); // End of line 0 (before newline)
+        assert_eq!(doc.char_position_to_line(7), 1); // Start of line 1 (after newline)
+        assert_eq!(doc.char_position_to_line(10), 1); // Middle of line 1
+        assert_eq!(doc.char_position_to_line(14), 2); // Start of line 2
+        
+        // Test boundary conditions
+        assert_eq!(doc.char_position_to_line(1000), 2); // Beyond end should clamp to last line
+        
+        // Test empty document
+        let empty_doc = TextDocument::new();
+        assert_eq!(empty_doc.char_position_to_line(0), 0);
+    }
+    
+    #[test]
+    fn test_line_to_char_range() {
+        let doc = TextDocument::with_content("Line 0\nLine 1\nLine 2".to_string());
+        
+        // Test each line's character range
+        assert_eq!(doc.line_to_char_range(0), (0, 7)); // "Line 0\n"
+        assert_eq!(doc.line_to_char_range(1), (7, 14)); // "Line 1\n"
+        assert_eq!(doc.line_to_char_range(2), (14, 20)); // "Line 2"
+        
+        // Test boundary conditions
+        assert_eq!(doc.line_to_char_range(100), (14, 20)); // Beyond end should clamp to last line
+        
+        // Test empty document
+        let empty_doc = TextDocument::new();
+        assert_eq!(empty_doc.line_to_char_range(0), (0, 0));
+    }
+    
+    #[test]
+    fn test_smart_invalidation_with_complex_edits() {
+        let doc = TextDocument::with_content("First line\nSecond line\nThird line\nFourth line".to_string());
+        
+        // Test insertion that creates new lines
+        let affected = doc.get_affected_lines_for_insertion(10, "\nNew line\nAnother line");
+        assert!(affected.contains(&0)); // Original line is split
+        assert!(affected.contains(&1)); // First new line
+        assert!(affected.contains(&2)); // Second new line
+        
+        // Test deletion that spans multiple lines
+        let affected = doc.get_affected_lines_for_deletion(5, 25); // From middle of line 0 to middle of line 2
+        assert_eq!(affected, vec![0, 1, 2]);
+        
+        // Test replacement that changes line structure significantly
+        let affected = doc.get_affected_lines_for_replacement(10, 30, "Single replacement");
+        assert!(affected.len() >= 2); // Should affect multiple lines
     }
 }

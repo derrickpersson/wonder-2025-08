@@ -93,20 +93,122 @@ impl MarkdownEditor {
         let mapper = RopeCoordinateMapper::new(rope);
         let old_point = mapper.offset_to_point(old_position);
         
+        // The CursorMovementService handles visual cursor position tracking internally
+        
+        // Check if this is a navigation command that should use visual lines
+        let key_binding = crate::input::keymap::KeyBinding {
+            key: event.keystroke.key.clone(),
+            modifiers: crate::input::keymap::Modifiers::from_gpui(&event.keystroke.modifiers),
+        };
+        
+        if let Some(action) = self.input_router.keymap().get(&key_binding) {
+            match action {
+                crate::input::actions::EditorAction::MoveCursor(movement) => {
+                    if self.cursor_movement.move_cursor(
+                        movement.clone(),
+                        &mut self.document,
+                        self.hybrid_renderer.line_wrapper(),
+                        &self.visual_line_manager,
+                        false, // not extending selection
+                    ) {
+                        cx.notify();
+                        
+                        // Log the movement
+                        let new_position = self.document.cursor_position();
+                        let new_content = self.document.content();
+                        let new_rope = Rope::from_str(&new_content);
+                        let new_mapper = RopeCoordinateMapper::new(new_rope);
+                        let _new_point = new_mapper.offset_to_point(new_position);
+                        
+                        log_keyboard_input(
+                            &event.keystroke.key,
+                            &format!("{:?}", event.keystroke.modifiers),
+                            old_position,
+                            new_position,
+                            self.document.has_selection()
+                        );
+                        
+                        log_cursor_movement(
+                            &format!("Visual {} key", event.keystroke.key),
+                            old_position,
+                            new_position,
+                            old_point,
+                            _new_point,
+                            &new_content
+                        );
+                        
+                        // CRITICAL: Ensure cursor remains visible after movement
+                        self.ensure_cursor_visible();
+                        
+                        return; // Skip normal InputRouter handling
+                    }
+                }
+                crate::input::actions::EditorAction::ExtendSelection(movement) => {
+                    if self.cursor_movement.move_cursor(
+                        movement.clone(),
+                        &mut self.document,
+                        self.hybrid_renderer.line_wrapper(),
+                        &self.visual_line_manager,
+                        true, // extending selection
+                    ) {
+                        cx.notify();
+                        
+                        // Log the movement
+                        let new_position = self.document.cursor_position();
+                        let new_content = self.document.content();
+                        let new_rope = Rope::from_str(&new_content);
+                        let new_mapper = RopeCoordinateMapper::new(new_rope);
+                        let _new_point = new_mapper.offset_to_point(new_position);
+                        
+                        log_keyboard_input(
+                            &event.keystroke.key,
+                            &format!("{:?}", event.keystroke.modifiers),
+                            old_position,
+                            new_position,
+                            self.document.has_selection()
+                        );
+                        
+                        log_cursor_movement(
+                            &format!("Visual selection {} key", event.keystroke.key),
+                            old_position,
+                            new_position,
+                            old_point,
+                            _new_point,
+                            &new_content
+                        );
+                        
+                        // CRITICAL: Ensure cursor remains visible after selection extension
+                        self.ensure_cursor_visible();
+                        
+                        return; // Skip normal InputRouter handling
+                    }
+                }
+                _ => {} // Let other actions fall through to normal handling
+            }
+        }
+        
         // Use the new InputRouter for keyboard handling
         let handled = self.input_router.handle_key_event(event, &mut self.document);
+        
+        // If the keyboard event was handled, ensure cursor visibility
+        // This covers actions like Delete, Backspace, and other cursor-moving operations
+        if handled {
+            self.ensure_cursor_visible();
+        }
         
         // Special handling for Enter key (newline)
         if event.keystroke.key == "enter" {
             self.input_router.handle_char_input('\n', &mut self.document);
             cx.notify();
+            // Ensure cursor remains visible after Enter
+            self.ensure_cursor_visible();
             
             // Log the operation
             let new_position = self.document.cursor_position();
             let new_content = self.document.content();
             let new_rope = Rope::from_str(&new_content);
             let new_mapper = RopeCoordinateMapper::new(new_rope);
-            let new_point = new_mapper.offset_to_point(new_position);
+            let _new_point = new_mapper.offset_to_point(new_position);
             
             log_keyboard_input(
                 "enter",
@@ -121,7 +223,7 @@ impl MarkdownEditor {
                 old_position,
                 new_position,
                 old_point,
-                new_point,
+                _new_point,
                 &new_content
             );
             
@@ -138,7 +240,7 @@ impl MarkdownEditor {
             let new_content = self.document.content();
             let new_rope = Rope::from_str(&new_content);
             let new_mapper = RopeCoordinateMapper::new(new_rope);
-            let new_point = new_mapper.offset_to_point(new_position);
+            let _new_point = new_mapper.offset_to_point(new_position);
             
             log_keyboard_input(
                 "tab",
@@ -158,7 +260,7 @@ impl MarkdownEditor {
             let new_content = self.document.content();
             let new_rope = Rope::from_str(&new_content);
             let new_mapper = RopeCoordinateMapper::new(new_rope);
-            let new_point = new_mapper.offset_to_point(new_position);
+            let _new_point = new_mapper.offset_to_point(new_position);
             
             // Log keyboard input
             log_keyboard_input(
@@ -176,7 +278,7 @@ impl MarkdownEditor {
                     old_position,
                     new_position,
                     old_point,
-                    new_point,
+                    _new_point,
                     &new_content
                 );
             }
